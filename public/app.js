@@ -1,0 +1,454 @@
+'use strict';
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const rp = n => n === null || n === undefined || n === '' ? '' : 'Rp' + Number(n).toLocaleString('id-ID');
+const ROLE = { kepala: 'Kepala Puskesmas', bendahara: 'Bendahara', program: 'Pengelola Program', pegawai: 'Pegawai' };
+let S = { meta: {}, user: null, bisaTulis: false, bisaBaca: false, refs: {}, tahun: 2026 };
+
+async function api(url, opt = {}) {
+  const r = await fetch(url, { credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, ...opt, body: opt.body && typeof opt.body !== 'string' ? JSON.stringify(opt.body) : opt.body });
+  if (r.status === 401 && !url.includes('login')) { showLogin(); throw new Error('Sesi berakhir.'); }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { const e = new Error(j.error || 'Terjadi kesalahan.'); e.galat = j.galat; throw e; }
+  return j;
+}
+function toast(msg, bad) { const t = $('#toast'); t.textContent = msg; t.className = 'toast show' + (bad ? ' bad' : ''); clearTimeout(toast.t); toast.t = setTimeout(() => t.className = 'toast', 3500); }
+async function download(url, name) {
+  const r = await fetch(url, { credentials: 'same-origin' });
+  if (!r.ok) return toast((await r.json().catch(() => ({}))).error || 'Gagal mengunduh.', 1);
+  const a = document.createElement('a'); a.href = URL.createObjectURL(await r.blob()); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+
+// ---------- login ----------
+function showLogin() { $('#app').hidden = true; $('#login').hidden = false; }
+$('#loginForm').onsubmit = async e => {
+  e.preventDefault(); $('#loginErr').textContent = '';
+  const f = new FormData(e.target);
+  try { await api('/api/login', { method: 'POST', body: Object.fromEntries(f) }); e.target.reset(); await start(); }
+  catch (x) { $('#loginErr').textContent = x.message; }
+};
+$('#logoutBtn').onclick = async () => { await api('/api/logout', { method: 'POST' }); showLogin(); };
+$('#menuBtn').onclick = () => $('#nav').classList.toggle('open');
+$('#pwBtn').onclick = () => dialog('Ganti password', `
+  <label>Password lama<input name="lama" type="password" required></label>
+  <label>Password baru (min. 8 karakter)<input name="baru" type="password" minlength="8" required></label>`,
+  async d => { await api('/api/ganti-password', { method: 'POST', body: d }); toast('Password diganti.'); });
+
+// ---------- dialog ----------
+function dialog(judul, bodyHtml, onSave, saveLabel = 'Simpan') {
+  const dlg = $('#dlg');
+  $('#dlgForm').innerHTML = `<div class="dlg"><h3>${esc(judul)}</h3>${bodyHtml}<div class="err" id="dlgErr" role="alert"></div>
+    <div class="row"><button type="button" class="btn" id="dlgCancel">Batal</button>${onSave ? `<button class="btn primary" id="dlgOk">${saveLabel}</button>` : ''}</div></div>`;
+  $('#dlgCancel').onclick = () => dlg.close();
+  $('#dlgForm').onsubmit = async e => {
+    e.preventDefault(); if (!onSave) return;
+    const fd = new FormData(e.target), d = {};
+    e.target.querySelectorAll('input,select,textarea').forEach(el => { d[el.name] = el.type === 'checkbox' ? el.checked : fd.get(el.name); });
+    try { await onSave(d); dlg.close(); } catch (x) { $('#dlgErr').textContent = x.message + (x.galat ? ' — ' + x.galat.join('; ') : ''); }
+  };
+  dlg.showModal();
+}
+
+// ---------- navigasi ----------
+const MENU = [
+  ['Anggaran', [['bok', 'Pagu Anggaran BOK'], ['rencana', 'Perencanaan (RPK/POA)']]],
+  ['Master Data', [['pegawai', 'Pegawai'], ['sumber_dana', 'Sumber Dana'], ['pagu', 'Pagu DAU / BLUD'], ['lokasi', 'Lokasi Tujuan'], ['tarif', 'Tarif Perbup'], ['pejabat', 'Pejabat'], ['libur', 'Hari Libur'], ['cuti', 'Cuti Pegawai'], ['pengaturan', 'Pengaturan & Kop']]],
+  ['Alat', [['kalkulator', 'Kalkulator Biaya'], ['riwayat', 'Riwayat Perubahan'], ['data', 'Backup & Ekspor']]],
+  ['Sistem', [['users', 'Pengguna']]],
+];
+function buildNav() {
+  let h = '';
+  for (const [g, items] of MENU) {
+    const vis = items.filter(([k]) => S.meta[k] || (['kalkulator', 'data', 'bok', 'rencana'].includes(k) && S.bisaBaca) || (k === 'riwayat' && S.bisaTulis));
+    if (!vis.length) continue;
+    h += `<h4>${g}</h4>` + vis.map(([k, l]) => `<a data-k="${k}">${l}</a>`).join('');
+  }
+  if (!S.bisaBaca) h = '<h4>Akses terbatas</h4><a class="on">Beranda</a>';
+  $('#nav').innerHTML = h;
+  $('#nav').onclick = e => { const k = e.target.dataset.k; if (k) { location.hash = k; $('#nav').classList.remove('open'); } };
+}
+async function route() {
+  const k = location.hash.slice(1) || (S.bisaBaca ? 'bok' : '');
+  document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('on', a.dataset.k === k));
+  const m = $('#main');
+  try {
+    if (!S.bisaBaca) m.innerHTML = `<div class="card"><h2>Selamat datang, ${esc(S.user.nama)}</h2><p class="muted">Jadwal, Surat Tugas, dan rincian uang Anda akan tampil di sini pada tahap berikutnya.</p></div>`;
+    else if (k === 'bok') await viewBok(m);
+    else if (k === 'rencana') await viewRencana(m);
+    else if (k === 'kalkulator') await viewKalkulator(m);
+    else if (k === 'riwayat') await viewRiwayat(m);
+    else if (k === 'data') viewData(m);
+    else if (S.meta[k]) await viewTabel(m, k);
+  } catch (e) { m.innerHTML = `<div class="card err">${esc(e.message)}</div>`; }
+}
+window.onhashchange = route;
+
+async function refs() {
+  for (const r of ['pegawai', 'sumber_dana', 'lokasi']) if (S.meta[r]) S.refs[r] = await api('/api/data/' + r);
+}
+
+// ---------- tabel master generik ----------
+function cell(f, v, row) {
+  if (f.type === 'bool') return v ? 'Ya' : '<span class="badge off">Nonaktif</span>';
+  if (f.type === 'rupiah') return rp(v);
+  if (f.type === 'ref') { const x = (S.refs[f.ref] || []).find(o => o.id === v); return esc(x ? x[f.refLabel] : v ?? ''); }
+  if (f.type === 'select') { const o = f.opts.find(o => (Array.isArray(o) ? o[0] : o) === v); return esc(o ? (Array.isArray(o) ? o[1] : o) : v ?? ''); }
+  if (f.k === 'tingkat' && f.ro) return v ? `<span class="badge ${v}">Tingkat ${esc(v)}</span>` : '';
+  return esc(v ?? '');
+}
+async function viewTabel(m, k) {
+  const M = S.meta[k], rw = S.bisaTulis && !(k === 'users' && S.user.role !== 'kepala');
+  await refs();
+  const q = { teks: '', tahun: S.tahun };
+  const load = async () => (await api('/api/data/' + k + (M.tahunFilter ? '?tahun=' + q.tahun : '')));
+  let rows = await load();
+  const cols = M.list.map(c => M.fields.find(f => f.k === c));
+  const draw = () => {
+    const t = q.teks.toLowerCase();
+    const vis = rows.filter(r => !t || JSON.stringify(Object.values(r)).toLowerCase().includes(t) || cols.some(c => String(cell(c, r[c.k], r)).toLowerCase().includes(t)));
+    $('#tb').innerHTML = vis.map(r => `<tr>${cols.map(c => `<td class="${c.type === 'rupiah' ? 'num' : ''}">${cell(c, r[c.k], r)}</td>`).join('')}
+      ${rw ? `<td style="white-space:nowrap"><button class="btn small" data-e="${r.id}">Ubah</button>${M.noDelete ? '' : ` <button class="btn small danger" data-d="${r.id}">Hapus</button>`}</td>` : ''}</tr>`).join('')
+      || `<tr><td colspan="${cols.length + 1}" class="muted">Tidak ada data.</td></tr>`;
+    $('#cnt').textContent = vis.length + ' data';
+  };
+  m.innerHTML = `<h2>${esc(M.judul)}</h2>
+   <div class="bar">
+     <input id="cari" type="search" placeholder="Cari…" aria-label="Cari">
+     ${M.tahunFilter ? `<label style="display:flex;gap:6px;align-items:center">Tahun <input id="thn" type="number" value="${q.tahun}" style="width:90px"></label>` : ''}
+     <span class="muted" id="cnt"></span><span class="spacer" style="flex:1"></span>
+     ${rw && !M.noCreate ? `<button class="btn primary" id="add">+ Tambah</button>` : ''}
+     ${rw && !M.noCreate && k !== 'users' ? `<button class="btn" id="imp">Impor Excel</button><button class="btn" id="tpl">Template</button>` : ''}
+   </div>
+   ${k === 'pegawai' ? '<p class="muted">Tingkat biaya dihitung otomatis (Perbup Pasal 7): Eselon III / Gol. IV = C; Eselon IV / Gol. III, II, I & Non ASN = D.</p>' : ''}
+   ${k === 'tarif' ? '<p class="muted">Tarif disimpan per tahun berlaku & dasar hukum. Jika Perbup berubah, tambahkan tarif tahun baru (atau impor dari Excel) — hitungan otomatis mengikuti.</p>' : ''}
+   <div class="tbl-wrap"><table><thead><tr>${cols.map(c => `<th>${esc(c.label.replace(/ \(.*/, ''))}</th>`).join('')}${rw ? '<th></th>' : ''}</tr></thead><tbody id="tb"></tbody></table></div>`;
+  draw();
+  $('#cari').oninput = e => { q.teks = e.target.value; draw(); };
+  if ($('#thn')) $('#thn').onchange = async e => { q.tahun = S.tahun = Number(e.target.value); rows = await load(); draw(); };
+  const reload = async () => { await refs(); rows = await load(); draw(); };
+  const form = (row = {}) => {
+    const fields = M.fields.filter(f => !(f.ro && !row.id));
+    return `<div class="grid2">` + fields.map(f => {
+      const v = row[f.k] ?? f.def ?? (f.k === 'tahun' || f.k === 'tahun_berlaku' ? q.tahun : '');
+      const ro = f.ro ? ' readonly' : '';
+      let inp;
+      if (f.type === 'bool') inp = `<input type="checkbox" name="${f.k}" ${v ? 'checked' : ''}>`;
+      else if (f.type === 'select') inp = `<select name="${f.k}">${f.req ? '' : '<option value=""></option>'}${f.opts.map(o => { const [a, b] = Array.isArray(o) ? o : [o, o]; return `<option value="${esc(a)}" ${a === v ? 'selected' : ''}>${esc(b)}</option>`; }).join('')}</select>`;
+      else if (f.type === 'ref') inp = `<select name="${f.k}"><option value=""></option>${(S.refs[f.ref] || []).filter(o => o.id !== row.id).map(o => `<option value="${o.id}" ${o.id === v ? 'selected' : ''}>${esc(o[f.refLabel])}</option>`).join('')}</select>`;
+      else inp = `<input name="${f.k}" type="${f.type === 'number' || f.type === 'rupiah' ? 'number' : f.type === 'date' ? 'date' : f.type === 'password' ? 'password' : 'text'}" value="${f.type === 'password' ? '' : esc(v)}" ${f.type === 'rupiah' ? 'min="0" step="1"' : ''} ${f.req ? 'required' : ''}${ro}>`;
+      return `<label ${f.k === 'kunci_tarif' || f.k === 'keterangan' || f.k === 'uraian' ? 'style="grid-column:1/-1"' : ''}>${esc(f.label)}${inp}</label>`;
+    }).join('') + '</div>';
+  };
+  if ($('#add')) $('#add').onclick = () => dialog('Tambah ' + M.judul, form(), async d => { await api('/api/data/' + k, { method: 'POST', body: d }); toast('Tersimpan.'); await reload(); });
+  if ($('#tpl')) $('#tpl').onclick = () => download('/api/template/' + k, `template_${k}.xlsx`);
+  if ($('#imp')) $('#imp').onclick = () => dialog('Impor Excel — ' + M.judul, `<p class="muted">Gunakan <b>Template</b> (baris pertama = nama kolom). Baris yang kuncinya sama akan diperbarui, lainnya ditambahkan. Jika ada satu baris salah, seluruh impor dibatalkan.</p><input type="file" name="berkas" accept=".xlsx,.xls,.csv" required>`,
+    async () => {
+      const file = $('#dlgForm input[type=file]').files[0]; if (!file) throw new Error('Pilih berkas.');
+      const b64 = btoa(new Uint8Array(await file.arrayBuffer()).reduce((s, b) => s + String.fromCharCode(b), ''));
+      const r = await api('/api/import/' + k, { method: 'POST', body: { file: b64 } });
+      toast(`Impor selesai: ${r.tambah} ditambah, ${r.ubah} diperbarui.`); await reload();
+    }, 'Impor');
+  $('#tb').onclick = e => {
+    const id = Number(e.target.dataset.e || e.target.dataset.d); if (!id) return;
+    const row = rows.find(r => r.id === id);
+    if (e.target.dataset.e) dialog('Ubah ' + M.judul, form(row), async d => { await api(`/api/data/${k}/${id}`, { method: 'PUT', body: d }); toast('Perubahan disimpan.'); await reload(); });
+    else dialog('Hapus data?', `<p>Data ini akan dihapus dan tercatat di riwayat. Untuk pegawai/lokasi sebaiknya <b>nonaktifkan</b>, bukan hapus.</p>`, async () => { await api(`/api/data/${k}/${id}`, { method: 'DELETE' }); toast('Dihapus.'); await reload(); }, 'Hapus');
+  };
+}
+
+// ---------- Pagu Anggaran BOK ----------
+const fmt = v => Number(v).toLocaleString('id-ID', { maximumFractionDigits: 2 });
+const volTxt = b => [[b.vol1, b.sat1], [b.vol2, b.sat2], [b.vol3, b.sat3]].filter(([v, s]) => Number(v) !== 1 || s).map(([v, s]) => `${fmt(v)}${s ? ' ' + esc(s) : ''}`).join(' × ') || '1';
+S.bokTahun = 2027; S.bokOpen = new Set(); S.bokCari = '';
+
+async function viewBok(m) {
+  const T = S.bokTahun;
+  const [tr, tahunList] = await Promise.all([api('/api/bok/' + T), api('/api/bok/tahun')]);
+  const rw = S.bisaTulis, pagu = tr.pagu ? tr.pagu.pagu : 0, selisih = pagu - tr.total;
+  const nR = tr.menu.reduce((s, x) => s + x.rincian.length, 0), nB = tr.menu.reduce((s, x) => s + x.rincian.reduce((a, r) => a + r.baris.length, 0), 0);
+  const jenisList = [...new Set(tr.menu.flatMap(x => x.rincian.flatMap(r => r.baris.map(b => b.jenis_belanja))))];
+  const q = S.bokCari.toLowerCase();
+  const cocok = (...a) => !q || a.join(' ').toLowerCase().includes(q);
+  const btn = (act, id, label, cls = '') => rw ? `<button class="btn small ${cls}" data-act="${act}" data-id="${id}">${label}</button>` : '';
+
+  const barisRow = (b, r) => `<tr><td>${esc(b.komponen ?? '')}</td><td>${esc(b.jenis_belanja)}${b.kode_rekening ? `<br><span class="muted">${esc(b.kode_rekening)}</span>` : ''}</td>
+    <td>${esc(b.uraian ?? '')}${b.satuan ? ` <span class="muted">(${esc(b.satuan)})</span>` : ''}</td><td>${volTxt(b)}</td><td class="num">${rp(b.unit_cost)}</td>
+    <td class="num">${rp(b.jumlah)}${b.beda ? `<br><span class="warn" title="Jumlah dari berkas Excel tidak sama dengan volume × tarif">⚠ ≠ hitungan</span>` : ''}</td>
+    ${rw ? `<td style="white-space:nowrap">${btn('ub-baris', b.id, 'Ubah')} ${btn('dup-baris', b.id, 'Salin')} ${btn('hps-baris', b.id, 'Hapus', 'danger')}</td>` : ''}</tr>`;
+
+  const menus = tr.menu.map(mn => {
+    const rinc = mn.rincian.map(r => {
+      const bar = r.baris.filter(b => cocok(mn.nama, r.nama, b.komponen, b.jenis_belanja, b.uraian));
+      if (q && !bar.length && !cocok(r.nama)) return '';
+      return `<div class="rinc"><div class="rinc-h"><div><b>${esc(r.no ?? '')}. ${esc(r.nama)}</b><br><span class="muted">${r.baris.length} baris · ${rp(r.total)}</span></div>
+        <div class="acts">${btn('tmb-baris', r.id, '+ Baris', 'primary')} ${btn('ub-rinc', r.id, 'Ubah')} ${btn('hps-rinc', r.id, 'Hapus', 'danger')}</div></div>
+        ${bar.length ? `<div class="tbl-wrap"><table><thead><tr><th>Komponen</th><th>Jenis belanja</th><th>Uraian</th><th>Volume</th><th>Tarif</th><th>Jumlah</th>${rw ? '<th></th>' : ''}</tr></thead><tbody>${bar.map(b => barisRow(b, r)).join('')}</tbody></table></div>` : '<p class="muted" style="margin:6px 0">Belum ada baris biaya.</p>'}</div>`;
+    }).join('');
+    if (q && !rinc) return '';
+    const persen = pagu ? (mn.total / pagu * 100).toFixed(1) : '0';
+    return `<details class="menu" data-m="${mn.id}" ${S.bokOpen.has(mn.id) || q ? 'open' : ''}><summary><div class="sum-l"><b>Menu ${esc(mn.no ?? '')} — ${esc(mn.nama)}</b>
+      <span class="muted">${mn.rincian.length} rincian · ${persen}% dari pagu</span></div><div class="sum-r"><b>${rp(mn.total)}</b></div></summary>
+      <div class="acts" style="margin:8px 0">${btn('tmb-rinc', mn.id, '+ Rincian Menu', 'primary')} ${btn('ub-menu', mn.id, 'Ubah menu')} ${btn('hps-menu', mn.id, 'Hapus menu', 'danger')}</div>${rinc || '<p class="muted">Belum ada rincian menu.</p>'}</details>`;
+  }).join('');
+
+  m.innerHTML = `<h2>Pagu Anggaran BOK</h2><p class="muted">Rencana Anggaran Biaya (RAB) BOK Puskesmas: Menu → Rincian Menu → baris biaya. Baris-baris inilah yang nanti dipakai Perencanaan, Panjar, dan SPJ.</p>
+  <div class="bar"><label style="display:flex;gap:6px;align-items:center">Tahun <input id="bThn" type="number" value="${T}" style="width:90px" list="bThnList"></label>
+   <datalist id="bThnList">${tahunList.map(t => `<option value="${t}">`).join('')}</datalist>
+   <input id="bCari" type="search" placeholder="Cari kegiatan / belanja…" value="${esc(S.bokCari)}" aria-label="Cari">
+   <span style="flex:1"></span>
+   ${rw ? `<button class="btn primary" data-act="tmb-menu">+ Menu</button><button class="btn" data-act="imp-rab">Impor RAB Excel</button>` : ''}
+   <button class="btn" data-act="exp-rab">Ekspor Excel</button>
+   ${rw && tr.menu.length ? `<button class="btn danger" data-act="hps-semua">Kosongkan</button>` : ''}</div>
+  <div class="kv">
+   <div class="card"><span class="muted">${esc(tr.pagu ? tr.pagu.jenis : 'Pagu')} ${T}</span><b>${rp(pagu)}</b>${rw ? `<button class="btn small" data-act="ub-pagu">${tr.pagu ? 'Ubah pagu' : 'Atur pagu'}</button>` : ''}</div>
+   <div class="card"><span class="muted">Total RAB (jumlah baris)</span><b>${rp(tr.total)}</b><span class="muted">${tr.menu.length} menu · ${nR} rincian · ${nB} baris</span></div>
+   <div class="card"><span class="muted">${selisih < 0 ? 'Melebihi pagu' : selisih === 0 ? 'Selisih' : 'Belum teralokasi'}</span><b class="${selisih < 0 ? 'err' : selisih === 0 ? 'okc' : 'warn'}">${rp(Math.abs(selisih))}</b>
+    <span class="muted">${selisih === 0 && pagu ? '✓ RAB sama dengan pagu' : selisih < 0 ? 'Kurangi baris atau naikkan pagu' : ''}</span></div></div>
+  ${tr.menu.length ? menus : `<div class="card"><p>Belum ada RAB BOK untuk tahun ${T}.</p>${rw ? '<p class="muted">Tambah menu satu per satu, atau gunakan <b>Impor RAB Excel</b> (format RAB BOK Puskesmas).</p>' : ''}</div>`}`;
+
+  const reload = async () => { await viewBok(m); };
+  $('#bThn').onchange = e => { S.bokTahun = Number(e.target.value) || T; reload(); };
+  $('#bCari').oninput = e => { S.bokCari = e.target.value; clearTimeout(viewBok.t); viewBok.t = setTimeout(async () => { await reload(); const c = $('#bCari'); c.focus(); c.setSelectionRange(c.value.length, c.value.length); }, 300); };
+  m.querySelectorAll('details.menu').forEach(d => d.addEventListener('toggle', () => { const id = Number(d.dataset.m); d.open ? S.bokOpen.add(id) : S.bokOpen.delete(id); }));
+
+  const menuById = id => tr.menu.find(x => x.id === id);
+  const rincById = id => tr.menu.flatMap(x => x.rincian).find(x => x.id === id);
+  const barisById = id => tr.menu.flatMap(x => x.rincian.flatMap(r => r.baris)).find(x => x.id === id);
+  const done = msg => async () => { toast(msg); await reload(); };
+  const formNoNama = (o = {}, lblNo, lblNama) => `<div class="grid2"><label>${lblNo}<input name="no" value="${esc(o.no ?? '')}"></label></div><label>${lblNama}<input name="nama" value="${esc(o.nama ?? '')}" required></label>`;
+  function formBaris(b = {}) {
+    const v = (k, d = '') => esc(b[k] ?? d);
+    return `<datalist id="jb">${jenisList.map(j => `<option value="${esc(j)}">`).join('')}</datalist>
+    <label>Komponen / sub-kegiatan (opsional)<input name="komponen" value="${v('komponen')}"></label>
+    <div class="grid2"><label>Jenis belanja<input name="jenis_belanja" list="jb" value="${v('jenis_belanja')}" required></label>
+     <label>Kode rekening (opsional)<input name="kode_rekening" value="${v('kode_rekening')}"></label></div>
+    <div class="grid2"><label>Uraian komponen<input name="uraian" value="${v('uraian')}" placeholder="mis. Transport Petugas"></label>
+     <label>Satuan<input name="satuan" value="${v('satuan')}" placeholder="mis. Orang/Hari"></label></div>
+    ${[1, 2, 3].map(i => `<div class="grid2"><label>Volume ${i}<input name="vol${i}" type="number" min="0" step="any" value="${v('vol' + i, 1)}"></label><label>Satuan volume ${i}<input name="sat${i}" value="${v('sat' + i)}"></label></div>`).join('')}
+    <label>Tarif / unit cost (Rp)<input name="unit_cost" type="number" min="0" step="1" value="${v('unit_cost', 0)}"></label>
+    <div class="card" style="padding:10px">Jumlah = Vol1 × Vol2 × Vol3 × Tarif = <b id="prevJ">${rp(b.jumlah ?? 0)}</b></div>`;
+  }
+  function liveJumlah() {
+    const f = $('#dlgForm'), calc = () => { const g = n => Number(f.elements[n].value) || 0; $('#prevJ').textContent = rp(Math.round(g('vol1') * g('vol2') * g('vol3') * g('unit_cost'))); };
+    f.addEventListener('input', calc);
+  }
+
+  m.onclick = async e => {
+    const el = e.target.closest('[data-act]'); if (!el) return;
+    e.preventDefault(); const act = el.dataset.act, id = Number(el.dataset.id);
+    if (act === 'tmb-menu') dialog('Tambah Menu', formNoNama({}, 'No. menu', 'Nama menu'), async d => { await api('/api/bok/menu', { method: 'POST', body: { ...d, tahun: T } }); await done('Menu ditambahkan.')(); });
+    else if (act === 'ub-menu') { const x = menuById(id); dialog('Ubah Menu', formNoNama(x, 'No. menu', 'Nama menu'), async d => { await api('/api/bok/menu/' + id, { method: 'PUT', body: d }); await done('Menu diubah.')(); }); }
+    else if (act === 'hps-menu') { const x = menuById(id); dialog('Hapus menu?', `<p>Menu <b>${esc(x.nama)}</b> beserta ${x.rincian.length} rincian dan ${x.rincian.reduce((s, r) => s + r.baris.length, 0)} baris (${rp(x.total)}) akan dihapus. Tercatat di riwayat.</p>`, async () => { await api('/api/bok/menu/' + id, { method: 'DELETE' }); await done('Menu dihapus.')(); }, 'Hapus'); }
+    else if (act === 'tmb-rinc') dialog('Tambah Rincian Menu', formNoNama({}, 'No. rincian', 'Nama rincian menu'), async d => { S.bokOpen.add(id); await api('/api/bok/rincian', { method: 'POST', body: { ...d, menu_id: id } }); await done('Rincian ditambahkan.')(); });
+    else if (act === 'ub-rinc') { const x = rincById(id); dialog('Ubah Rincian Menu', formNoNama(x, 'No. rincian', 'Nama rincian menu'), async d => { await api('/api/bok/rincian/' + id, { method: 'PUT', body: d }); await done('Rincian diubah.')(); }); }
+    else if (act === 'hps-rinc') { const x = rincById(id); dialog('Hapus rincian menu?', `<p><b>${esc(x.nama)}</b> beserta ${x.baris.length} baris (${rp(x.total)}) akan dihapus. Tercatat di riwayat.</p>`, async () => { await api('/api/bok/rincian/' + id, { method: 'DELETE' }); await done('Rincian dihapus.')(); }, 'Hapus'); }
+    else if (act === 'tmb-baris') { dialog('Tambah Baris Biaya', formBaris(), async d => { await api('/api/bok/baris', { method: 'POST', body: { ...d, rincian_id: id } }); await done('Baris ditambahkan.')(); }); liveJumlah(); }
+    else if (act === 'ub-baris') { dialog('Ubah Baris Biaya', formBaris(barisById(id)), async d => { await api('/api/bok/baris/' + id, { method: 'PUT', body: d }); await done('Baris diubah.')(); }); liveJumlah(); }
+    else if (act === 'dup-baris') { await api(`/api/bok/baris/${id}/duplikat`, { method: 'POST' }); await done('Baris disalin.')(); }
+    else if (act === 'hps-baris') { const b = barisById(id); dialog('Hapus baris?', `<p>${esc(b.komponen || b.uraian || b.jenis_belanja)} — ${rp(b.jumlah)} akan dihapus. Tercatat di riwayat.</p>`, async () => { await api('/api/bok/baris/' + id, { method: 'DELETE' }); await done('Baris dihapus.')(); }, 'Hapus'); }
+    else if (act === 'ub-pagu') dialog('Pagu BOK ' + T, `<label>Jenis<select name="jenis">${['Pagu Indikatif', 'Pagu Definitif', 'Pagu Perubahan'].map(j => `<option ${tr.pagu && tr.pagu.jenis === j ? 'selected' : ''}>${j}</option>`).join('')}</select></label>
+      <label>Jumlah pagu (Rp)<input name="pagu" type="number" min="0" step="1" required value="${pagu}"></label><label>Keterangan<input name="keterangan" value="${esc(tr.pagu?.keterangan ?? '')}"></label>`,
+      async d => { await api(`/api/bok/${T}/pagu`, { method: 'PUT', body: d }); await done('Pagu disimpan.')(); });
+    else if (act === 'hps-semua') dialog('Kosongkan RAB BOK ' + T + '?', `<p>Seluruh ${tr.menu.length} menu, ${nR} rincian, dan ${nB} baris tahun ${T} akan dihapus (pagu tetap). Tercatat di riwayat.</p>`, async () => { await api('/api/bok/' + T, { method: 'DELETE' }); await done('RAB dikosongkan.')(); }, 'Kosongkan');
+    else if (act === 'exp-rab') download(`/api/bok/${T}/export.xlsx`, `RAB_BOK_${T}.xlsx`);
+    else if (act === 'imp-rab') {
+      let hasil = null;
+      dialog('Impor RAB BOK', `<p class="muted">Pilih berkas RAB BOK Puskesmas (.xlsx). Menu, rincian, dan baris dibaca otomatis; pagu diisi dari "Jumlah Total Kebutuhan Anggaran" bila belum ada.</p>
+        <input type="file" name="berkas" accept=".xlsx,.xls" required><label>Tahun<input name="tahun" type="number" value="${T}"></label>
+        <label style="grid-auto-flow:column;justify-content:start;align-items:center;gap:8px"><input type="checkbox" name="ganti" ${tr.menu.length ? 'checked' : ''}> Ganti RAB tahun ini bila sudah ada</label>`,
+        async d => {
+          const file = $('#dlgForm input[type=file]').files[0]; if (!file) throw new Error('Pilih berkas.');
+          const b64 = btoa(new Uint8Array(await file.arrayBuffer()).reduce((s, x) => s + String.fromCharCode(x), ''));
+          hasil = await api('/api/bok/import', { method: 'POST', body: { file: b64, tahun: Number(d.tahun), ganti: d.ganti } });
+          S.bokTahun = hasil.tahun; await reload();
+          setTimeout(() => dialog('Impor selesai', `<p>Tahun <b>${hasil.tahun}</b>: ${hasil.menu} menu, ${hasil.baris} baris, total <b>${rp(hasil.total)}</b>.</p>${(hasil.peringatan || []).map(p => `<p class="warn">⚠ ${esc(p)}</p>`).join('')}`), 150);
+        }, 'Impor');
+    }
+  };
+}
+
+// ---------- Perencanaan (RPK/POA) ----------
+const BLN = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+const STATUS = ['Draft', 'Diajukan', 'Ditolak', 'Disetujui', 'Terjadwal', 'Terlaksana', 'SPJ Selesai'];
+S.rcTab = 'daftar'; S.rcBulan = ''; S.rcStatus = '';
+
+async function viewRencana(m) {
+  const T = S.bokTahun, rw = S.user.role !== 'pegawai', kepala = S.user.role === 'kepala';
+  await refs();
+  const qs = `tahun=${T}` + (S.rcBulan ? `&bulan=${S.rcBulan}` : '') + (S.rcStatus ? `&status=${encodeURIComponent(S.rcStatus)}` : '');
+  const [list, poa, tr] = await Promise.all([api('/api/rencana?' + qs), api('/api/rencana/poa?tahun=' + T), api('/api/bok/' + T)]);
+  const aktif = x => x.status !== 'Ditolak';
+  const semua = S.rcBulan || S.rcStatus ? await api(`/api/rencana?tahun=${T}`) : list;
+  const totalRencana = semua.filter(aktif).reduce((s, x) => s + x.estimasi, 0), disetujui = semua.filter(x => ['Disetujui', 'Terjadwal', 'Terlaksana', 'SPJ Selesai'].includes(x.status)).reduce((s, x) => s + x.estimasi, 0);
+  const pagu = tr.pagu ? tr.pagu.pagu : 0;
+  const bdg = s => `<span class="badge st-${s.replace(/ /g, '')}">${s}</span>`;
+
+  const aksi = r => {
+    const b = (a, l, c = '') => `<button class="btn small ${c}" data-a="${a}" data-id="${r.id}">${l}</button>`;
+    if (r.status === 'Draft' && r.bisa_ubah) return [b('ubah', 'Ubah'), b('ajukan', 'Ajukan', 'primary'), b('hapus', 'Hapus', 'danger')].join(' ');
+    if (r.status === 'Diajukan') return [r.bisa_ubah ? b('tarik', 'Tarik') : '', kepala ? b('setuju', 'Setujui', 'primary') + ' ' + b('tolak', 'Tolak', 'danger') : ''].join(' ');
+    if (r.status === 'Ditolak' && r.bisa_ubah) return b('revisi', 'Revisi');
+    if (r.status === 'Disetujui' && kepala) return b('batal', 'Batalkan persetujuan');
+    return '';
+  };
+  const baris = list.map(r => `<tr><td>${BLN[r.bulan - 1].slice(0, 3)}</td>
+    <td><b>${esc(r.kegiatan)}</b><br><span class="muted">${esc(r.rincian_no ?? '')}. ${esc(r.rincian)} · ${esc(r.pos_uraian ?? r.jenis_belanja)}</span>${r.alasan_tolak ? `<br><span class="err">Ditolak: ${esc(r.alasan_tolak)}</span>` : ''}</td>
+    <td>${esc(r.lokasi ?? '–')}</td><td>${r.jenis_perjalanan ? `${r.jumlah_petugas} org × ${r.jumlah_hari} hr × ${r.frekuensi}x<br><span class="muted">Tk. ${r.tingkat}${r.durasi === 'le8' ? ' · ≤8 jam' : ''}</span>` : '–'}</td>
+    <td class="num">${rp(r.estimasi)}</td><td>${bdg(r.status)}</td>${rw ? `<td style="white-space:nowrap">${aksi(r)}</td>` : ''}</tr>`).join('');
+
+  const poaRows = []; let lastMenu = null; const tot = Array(12).fill(0);
+  poa.forEach(x => {
+    if (x.menu !== lastMenu) { poaRows.push(`<tr class="grp"><td colspan="16">Menu ${esc(x.menu_no ?? '')} — ${esc(x.menu)}</td></tr>`); lastMenu = x.menu; }
+    x.bulan.forEach((v, i) => tot[i] += v);
+    poaRows.push(`<tr><td>${esc(x.rincian_no ?? '')}. ${esc(x.rincian)}</td><td class="num">${rp(x.pagu)}</td>${x.bulan.map(v => `<td class="num">${v ? rp(v) : '<span class="muted">·</span>'}</td>`).join('')}<td class="num"><b>${rp(x.total)}</b></td><td class="num ${x.sisa < 0 ? 'err' : ''}">${rp(x.sisa)}</td></tr>`);
+  });
+
+  m.innerHTML = `<h2>Perencanaan Kegiatan (RPK/POA) BOK</h2>
+  <p class="muted">Setiap rencana terikat ke satu baris RAB. Estimasi dihitung otomatis dari tarif Perbup, dan ditolak bila melebihi pagu baris atau pagu BOK.</p>
+  <div class="kv"><div class="card"><span class="muted">Pagu BOK ${T}</span><b>${rp(pagu)}</b></div>
+   <div class="card"><span class="muted">Total direncanakan</span><b>${rp(totalRencana)}</b><span class="muted">${pagu ? (totalRencana / pagu * 100).toFixed(1) : 0}% dari pagu</span></div>
+   <div class="card"><span class="muted">Sudah disetujui</span><b>${rp(disetujui)}</b></div>
+   <div class="card"><span class="muted">Sisa pagu belum direncanakan</span><b class="${pagu - totalRencana < 0 ? 'err' : ''}">${rp(pagu - totalRencana)}</b></div></div>
+  <div class="tabs"><button class="tab ${S.rcTab === 'daftar' ? 'on' : ''}" data-tab="daftar">Daftar Rencana</button><button class="tab ${S.rcTab === 'poa' ? 'on' : ''}" data-tab="poa">Matriks POA per Bulan</button></div>
+  ${S.rcTab === 'daftar' ? `<div class="bar"><label style="display:flex;gap:6px;align-items:center">Tahun <input id="rThn" type="number" value="${T}" style="width:90px"></label>
+    <select id="rBln"><option value="">Semua bulan</option>${BLN.map((b, i) => `<option value="${i + 1}" ${String(S.rcBulan) === String(i + 1) ? 'selected' : ''}>${b}</option>`).join('')}</select>
+    <select id="rSt"><option value="">Semua status</option>${STATUS.map(s => `<option ${S.rcStatus === s ? 'selected' : ''}>${s}</option>`).join('')}</select>
+    <span style="flex:1"></span>${rw ? '<button class="btn primary" data-a="tambah">+ Rencana Kegiatan</button>' : ''}</div>
+   <div class="tbl-wrap"><table><thead><tr><th>Bln</th><th>Kegiatan / pos anggaran</th><th>Lokasi</th><th>Petugas</th><th>Estimasi</th><th>Status</th>${rw ? '<th></th>' : ''}</tr></thead><tbody>${baris || `<tr><td colspan="7" class="muted">Belum ada rencana.</td></tr>`}</tbody></table></div>`
+  : `<div class="tbl-wrap"><table class="poa"><thead><tr><th>Kegiatan (rincian menu)</th><th>Pagu RAB</th>${BLN.map(b => `<th>${b.slice(0, 3)}</th>`).join('')}<th>Total</th><th>Sisa</th></tr></thead><tbody>${poaRows.join('') || '<tr><td colspan="16" class="muted">Belum ada RAB.</td></tr>'}
+   <tr class="grp"><td>Jumlah</td><td class="num">${rp(poa.reduce((s, x) => s + x.pagu, 0))}</td>${tot.map(v => `<td class="num">${rp(v)}</td>`).join('')}<td class="num">${rp(tot.reduce((a, b) => a + b, 0))}</td><td class="num">${rp(poa.reduce((s, x) => s + x.sisa, 0))}</td></tr></tbody></table></div>
+   <p class="muted">Rencana berstatus Ditolak tidak dihitung.</p>`}`;
+
+  const reload = () => viewRencana(m);
+  m.querySelectorAll('[data-tab]').forEach(t => t.onclick = () => { S.rcTab = t.dataset.tab; reload(); });
+  if ($('#rThn')) { $('#rThn').onchange = e => { S.bokTahun = Number(e.target.value) || T; reload(); }; $('#rBln').onchange = e => { S.rcBulan = e.target.value; reload(); }; $('#rSt').onchange = e => { S.rcStatus = e.target.value; reload(); }; }
+
+  const ubahStatus = async (id, ke, alasan) => { await api(`/api/rencana/${id}/status`, { method: 'POST', body: { ke, alasan } }); toast('Status: ' + ke); await reload(); };
+  async function formRencana(r) {
+    const opsi = await api('/api/rencana/opsi?tahun=' + T);
+    if (!opsi.length) return toast('Belum ada RAB BOK untuk tahun ini. Isi dulu di Pagu Anggaran BOK.', 1);
+    const lok = S.refs.lokasi.filter(l => l.aktif), v = (k, d = '') => esc(r?.[k] ?? d);
+    const grup = []; opsi.forEach(o => { let g = grup.find(x => x.id === o.rincian_id); if (!g) grup.push(g = { id: o.rincian_id, label: `Menu ${o.menu_no ?? ''} › ${o.rincian_no ?? ''}. ${o.rincian}`, items: [] }); g.items.push(o); });
+    const optPos = grup.map(g => `<optgroup label="${esc(g.label.slice(0, 90))}">${g.items.map(o => `<option value="${o.id}" ${r?.baris_id === o.id ? 'selected' : ''}>${esc((o.komponen ? o.komponen + ' · ' : '') + (o.uraian || o.jenis_belanja))} — sisa ${rp(o.sisa + (r?.baris_id === o.id ? r.estimasi : 0))}</option>`).join('')}</optgroup>`).join('');
+    dialog(r ? 'Ubah Rencana Kegiatan' : 'Tambah Rencana Kegiatan', `
+     <div class="grid2"><label>Bulan pelaksanaan<select name="bulan">${BLN.map((b, i) => `<option value="${i + 1}" ${(r?.bulan ?? new Date().getMonth() + 1) === i + 1 ? 'selected' : ''}>${b}</option>`).join('')}</select></label>
+      <label>Kode rekening (opsional)<input name="kode_rekening" value="${v('kode_rekening')}"></label></div>
+     <label>Pos anggaran (baris RAB BOK)<select name="baris_id" required><option value="">— pilih —</option>${optPos}</select></label>
+     <label>Nama kegiatan<input name="kegiatan" value="${v('kegiatan')}" placeholder="otomatis dari rincian menu bila kosong"></label>
+     <div id="secT"><div class="grid2">
+      <label>Lokasi tujuan<select name="lokasi_id"><option value="">— pilih —</option>${lok.map(l => `<option value="${l.id}" ${r?.lokasi_id === l.id ? 'selected' : ''}>${esc(l.nama)}</option>`).join('')}</select></label>
+      <label>Durasi (dalam kota)<select name="durasi"><option value="gt8" ${r?.durasi !== 'le8' ? 'selected' : ''}>Lebih dari 8 jam</option><option value="le8" ${r?.durasi === 'le8' ? 'selected' : ''}>Sampai dengan 8 jam</option></select></label>
+      <label>Jumlah petugas<input name="jumlah_petugas" type="number" min="1" value="${v('jumlah_petugas', 2)}"></label>
+      <label>Jumlah hari per pelaksanaan<input name="jumlah_hari" type="number" min="1" value="${v('jumlah_hari', 1)}"></label>
+      <label>Frekuensi (berapa kali/lokasi)<input name="frekuensi" type="number" min="1" value="${v('frekuensi', 1)}"></label>
+      <label>Tingkat biaya petugas<select name="tingkat"><option ${r?.tingkat !== 'C' ? 'selected' : ''}>D</option><option ${r?.tingkat === 'C' ? 'selected' : ''}>C</option></select></label>
+      <label>Kendaraan (antar kecamatan)<select name="roda"><option value="2" ${r?.roda !== 4 ? 'selected' : ''}>Roda 2</option><option value="4" ${r?.roda === 4 ? 'selected' : ''}>Roda 4</option></select></label>
+      <label>Penginapan<select name="menginap"><option value="tidak">Tidak menginap</option><option value="hotel" ${r?.menginap === 'hotel' ? 'selected' : ''}>Hotel (maks. tarif)</option><option value="tidak_hotel" ${r?.menginap === 'tidak_hotel' ? 'selected' : ''}>Lumpsum tanpa hotel</option></select></label>
+      <label>Transport lokal tambahan/orang (Rp)<input name="transport_manual" type="number" min="0" value="${v('transport_manual', 0)}"></label>
+      <label style="align-content:end"><span><input type="checkbox" name="pp" ${r?.pp === 0 ? '' : 'checked'}> Pulang-pergi</span></label></div></div>
+     <div id="secM"><label>Estimasi biaya (Rp) — bukan perjalanan dinas<input name="estimasi_manual" type="number" min="0" value="${v('estimasi_manual', 0)}"></label></div>
+     <label>Catatan<input name="catatan" value="${v('catatan')}"></label>
+     <div id="prev" class="card prev">Pilih pos anggaran untuk melihat estimasi.</div>`,
+      async d => { const res = await api(r ? `/api/rencana/${r.id}` : '/api/rencana', { method: r ? 'PUT' : 'POST', body: d }); toast('Rencana disimpan.' + (res.peringatan?.length ? ' ⚠ ' + res.peringatan[0] : '')); await reload(); });
+    const f = $('#dlgForm'), ok = $('#dlgOk'); let tm;
+    const koleksi = () => { const d = {}; [...f.elements].forEach(e => { if (e.name) d[e.name] = e.type === 'checkbox' ? e.checked : e.value; }); if (r) d.id = r.id; return d; };
+    const segarkan = async () => {
+      const o = opsi.find(x => x.id === Number(f.elements.baris_id.value));
+      $('#secT').style.display = !o || o.perjalanan ? '' : 'none'; $('#secM').style.display = o && !o.perjalanan ? '' : 'none';
+      if (!o) { ok.disabled = true; return; }
+      if (!f.elements.kegiatan.value || f.elements.kegiatan.dataset.auto) { f.elements.kegiatan.value = o.komponen || o.rincian; f.elements.kegiatan.dataset.auto = 1; }
+      if (!f.elements.kode_rekening.value && o.kode_rekening) f.elements.kode_rekening.value = o.kode_rekening;
+      const a = await api('/api/rencana/preview', { method: 'POST', body: koleksi() });
+      const L = (t, v, bad) => `<div class="pl"><span>${t}</span><b class="${bad ? 'err' : ''}">${v}</b></div>`;
+      $('#prev').innerHTML = `<div class="pl big"><span>Estimasi biaya</span><b>${rp(a.estimasi ?? 0)}</b></div>
+       ${a.rincian?.per_orang?.length ? `<div class="muted" style="font-size:.85em">Per orang: ${a.rincian.per_orang.map(x => `${esc(x.uraian)} ${x.volume}×${rp(x.tarif)}`).join(' + ')} = ${rp(a.rincian.total_per_orang)} · pengali ${a.rincian.pengali} (petugas × frekuensi)</div>` : ''}
+       ${a.pos ? L('Pagu pos anggaran', rp(a.pos.pagu)) + L('Sudah direncanakan', rp(a.pos.terpakai)) + L('Sisa pos setelah rencana ini', rp(a.pos.sisa_sesudah), a.pos.sisa_sesudah < 0) + L('Sisa kegiatan (semua baris)', rp(a.kegiatan.sisa_sesudah), a.kegiatan.sisa_sesudah < 0) + (a.bok.pagu !== null ? L('Sisa pagu BOK', rp(a.bok.sisa_sesudah), a.bok.sisa_sesudah < 0) : '') : ''}
+       ${(a.galat || []).map(g => `<p class="err">✖ ${esc(g)}</p>`).join('')}${(a.peringatan || []).map(p => `<p class="warn">⚠ ${esc(p)}</p>`).join('')}`;
+      ok.disabled = !a.ok;
+    };
+    f.addEventListener('input', e => { if (e.target.name === 'kegiatan') delete e.target.dataset.auto; clearTimeout(tm); tm = setTimeout(segarkan, 250); });
+    f.addEventListener('change', () => { clearTimeout(tm); tm = setTimeout(segarkan, 50); });
+    ok.disabled = true; segarkan();
+  }
+
+  m.onclick = async e => {
+    const el = e.target.closest('[data-a]'); if (!el) return; const a = el.dataset.a, id = Number(el.dataset.id), r = list.find(x => x.id === id);
+    try {
+      if (a === 'tambah') await formRencana();
+      else if (a === 'ubah') await formRencana(r);
+      else if (a === 'ajukan') await ubahStatus(id, 'Diajukan');
+      else if (a === 'tarik' || a === 'revisi') await ubahStatus(id, 'Draft');
+      else if (a === 'setuju') await ubahStatus(id, 'Disetujui');
+      else if (a === 'batal') dialog('Batalkan persetujuan?', '<p>Rencana kembali ke Draft agar bisa diubah.</p>', async () => { await ubahStatus(id, 'Draft'); }, 'Batalkan');
+      else if (a === 'tolak') dialog('Tolak rencana', '<label>Alasan penolakan<input name="alasan" required></label>', async d => { await ubahStatus(id, 'Ditolak', d.alasan); }, 'Tolak');
+      else if (a === 'hapus') dialog('Hapus rencana?', `<p>${esc(r.kegiatan)} (${rp(r.estimasi)}) akan dihapus. Tercatat di riwayat.</p>`, async () => { await api('/api/rencana/' + id, { method: 'DELETE' }); toast('Dihapus.'); await reload(); }, 'Hapus');
+    } catch (x) { toast(x.message, 1); }
+  };
+}
+
+// ---------- kalkulator ----------
+async function viewKalkulator(m) {
+  await refs();
+  const peg = S.refs.pegawai.filter(p => p.aktif), lok = S.refs.lokasi.filter(l => l.aktif);
+  m.innerHTML = `<h2>Kalkulator Biaya Perjalanan Dinas</h2><p class="muted">Estimasi otomatis dari tarif master (Perbup). Inilah mesin hitung yang dipakai Perencanaan & Panjar pada tahap berikutnya.</p>
+  <form id="kf" class="card"><div class="grid2">
+   <label>Pegawai<select name="pegawai_id">${peg.map(p => `<option value="${p.id}">${esc(p.nama)} — Tk. ${p.tingkat}</option>`).join('')}</select></label>
+   <label>Lokasi tujuan<select name="lokasi_id">${lok.map(l => `<option value="${l.id}">${esc(l.nama)}</option>`).join('')}</select></label>
+   <label>Durasi (dalam kota)<select name="durasi"><option value="gt8">Lebih dari 8 jam</option><option value="le8">Sampai dengan 8 jam</option></select></label>
+   <label>Jumlah hari<input name="hari" type="number" min="1" value="1"></label>
+   <label>Kendaraan (antar kecamatan)<select name="roda"><option value="2">Roda 2</option><option value="4">Roda 4</option></select></label>
+   <label>Penginapan<select name="menginap"><option value="tidak">Tidak menginap</option><option value="hotel">Hotel (biaya riil)</option><option value="tidak_hotel">Menginap tanpa hotel (lumpsum)</option></select></label>
+   <label>Biaya hotel riil per malam (Rp)<input name="inap_riil" type="number" min="0" placeholder="kosong = sesuai tarif"></label>
+   <label>Transport lokal/riil tambahan (Rp)<input name="transport_manual" type="number" min="0"></label>
+   <label><span><input type="checkbox" name="pp" checked> Pulang-pergi (transport ×2)</span></label>
+   <label><span><input type="checkbox" name="diklat"> Diklat dalam kota</span></label>
+  </div><div class="bar"><button class="btn primary">Hitung</button></div></form><div id="hasil" style="margin-top:14px"></div>`;
+  $('#kf').onsubmit = async e => {
+    e.preventDefault();
+    const d = Object.fromEntries(new FormData(e.target));
+    d.pp = e.target.pp.checked; d.diklat = e.target.diklat.checked;
+    ['pegawai_id', 'lokasi_id'].forEach(x => d[x] = Number(d[x]));
+    try {
+      const r = await api('/api/hitung-biaya', { method: 'POST', body: d });
+      $('#hasil').innerHTML = `<div class="card"><b>${esc(r.pegawai)}</b> (Tingkat ${r.tingkat}) → ${esc(r.lokasi)} · tarif tahun ${r.tahun}
+      <div class="tbl-wrap" style="margin-top:8px"><table><thead><tr><th>Komponen</th><th>Vol</th><th>Tarif</th><th>Jumlah</th></tr></thead><tbody>
+      ${r.baris.map(b => `<tr><td>${esc(b.uraian)}</td><td>${b.volume} ${esc(b.satuan)}</td><td class="num">${rp(b.tarif)}</td><td class="num">${rp(b.jumlah)}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">Tidak ada komponen biaya.</td></tr>'}
+      <tr><td colspan="3"><b>Total estimasi</b></td><td class="num"><b>${rp(r.total)}</b></td></tr></tbody></table></div>
+      ${r.peringatan.map(p => `<p class="warn">⚠ ${esc(p)}</p>`).join('')}</div>`;
+    } catch (x) { toast(x.message, 1); }
+  };
+}
+
+// ---------- riwayat ----------
+async function viewRiwayat(m) {
+  const rows = await api('/api/riwayat');
+  const ringkas = r => {
+    let a = {}, b = {}; try { a = JSON.parse(r.data_lama || '{}'); b = JSON.parse(r.data_baru || '{}'); } catch {}
+    if (r.aksi === 'UBAH') { const ch = Object.keys(b).filter(k => JSON.stringify(a[k]) !== JSON.stringify(b[k])); return ch.map(k => `${esc(k)}: ${esc(a[k] ?? '∅')} → ${esc(b[k] ?? '∅')}`).join('; '); }
+    return esc((r.aksi === 'HAPUS' ? r.data_lama : r.data_baru) || '').slice(0, 240);
+  };
+  m.innerHTML = `<h2>Riwayat Perubahan</h2><p class="muted">300 catatan terakhir: siapa, kapan, data lama → data baru.</p>
+  <div class="tbl-wrap"><table><thead><tr><th>Waktu</th><th>Pengguna</th><th>Tabel</th><th>Aksi</th><th>Perubahan</th></tr></thead><tbody>
+  ${rows.map(r => `<tr><td style="white-space:nowrap">${esc(r.waktu)}</td><td>${esc(r.username)}</td><td>${esc(r.tabel)} #${r.record_id ?? ''}</td><td>${esc(r.aksi)}</td><td class="diff">${ringkas(r)}</td></tr>`).join('')}</tbody></table></div>`;
+}
+
+// ---------- backup ----------
+function viewData(m) {
+  m.innerHTML = `<h2>Backup & Ekspor</h2><div class="card" style="display:grid;gap:10px;max-width:520px">
+   <div><b>Ekspor seluruh data ke Excel</b><p class="muted">Satu sheet per tabel master (plus riwayat untuk Kepala/Bendahara).</p><button class="btn primary" id="x1">Unduh Excel</button></div>
+   ${S.bisaTulis ? `<div><b>Backup database</b><p class="muted">Salinan utuh basis data (.db). Simpan di tempat aman secara berkala.</p><button class="btn" id="x2">Unduh backup</button></div>` : ''}</div>`;
+  $('#x1').onclick = () => download('/api/export/xlsx', 'sikadin_data.xlsx');
+  if ($('#x2')) $('#x2').onclick = () => download('/api/backup', 'sikadin_backup.db');
+}
+
+// ---------- mulai ----------
+async function start() {
+  try {
+    const m = await api('/api/meta');
+    S.meta = m.meta; S.user = m.user; S.bisaTulis = m.bisaTulis; S.bisaBaca = m.bisaBaca;
+  } catch { return showLogin(); }
+  $('#login').hidden = true; $('#app').hidden = false;
+  $('#who').textContent = `${S.user.nama} · ${ROLE[S.user.role]}`;
+  buildNav(); route();
+}
+start();

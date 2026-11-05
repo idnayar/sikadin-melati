@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SIKADIN – Puskesmas Melati</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div id="login" class="login" hidden>
+  <form id="loginForm" class="card login-card">
+    <h1>SIKADIN</h1>
+    <p class="muted">Sistem Informasi Keuangan &amp; Dinas Luar<br>UPT Puskesmas Melati, Kec. Selat, Kab. Kapuas</p>
+    <label>Username<input name="username" autocomplete="username" required></label>
+    <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
+    <div id="loginErr" class="err" role="alert"></div>
+    <button class="btn primary" type="submit">Masuk</button>
+  </form>
+</div>
+
+<div id="app" hidden>
+  <header class="top">
+    <button id="menuBtn" class="icon-btn" aria-label="Menu">☰</button>
+    <div class="brand">SIKADIN <small>Puskesmas Melati</small></div>
+    <div class="spacer"></div>
+    <span id="who" class="who"></span>
+    <button id="pwBtn" class="btn small">Ganti password</button>
+    <button id="logoutBtn" class="btn small">Keluar</button>
+  </header>
+  <div class="layout">
+    <nav id="nav" class="nav"></nav>
+    <main id="main" class="main"></main>
+  </div>
+</div>
+
+<dialog id="dlg"><form method="dialog" id="dlgForm"></form></dialog>
+<div id="toast" class="toast" role="status"></div>
+<script src="app.js"></script>
+</body>
+</html>
