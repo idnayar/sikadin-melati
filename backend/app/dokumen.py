@@ -342,7 +342,7 @@ def d_spd(isi: dict, st: dict, spds: list, mode: str = "srikandi") -> list:
                     "<br/>Pejabat Pelaksana Teknis Kegiatan (PPTK)", "<br/><br/><br/>" + (esc(pptk.get("nama") or "..................................") ), (f"NIP.{esc(pptk.get('nip'))}" if pptk.get("nip") else None))]])
     back = [
         [P("I", "tiny"), cell(), cell(f"Berangkat dari &nbsp;&nbsp;&nbsp;&nbsp;: &nbsp;{esc(asal)}", "(Tempat Kedudukan)", f"Pada Tanggal &nbsp;&nbsp;&nbsp;: &nbsp;{tgl(isi['mulai'])}", f"Ke &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;: &nbsp;{esc(tujuan)}",
-                                      "<br/>Pejabat Pelaksana Teknis Kegiatan (PPTK)", "<br/><br/><br/>" + esc(pptk.get("nama") or ".................................."), (f"NIP.{esc(pptk.get('nip'))}" if pptk.get("nip") else None))],
+                                      "<br/>Pejabat Pelaksana Teknis Kegiatan (PPTK)", "<br/><br/>" + esc(pptk.get("nama") or ".................................."), (f"NIP.{esc(pptk.get('nip'))}" if pptk.get("nip") else None))],
         [P("II", "tiny"), cell(f"Tiba di &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;: &nbsp;{esc(tujuan)}", "", f"Pada Tanggal &nbsp;&nbsp;: &nbsp;{tgl(isi['mulai'])}"),
          cell(f"Berangkat dari &nbsp;&nbsp;&nbsp;&nbsp;: &nbsp;{esc(tujuan)}", f"Ke &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;: &nbsp;{esc(asal)}", f"Pada Tanggal &nbsp;&nbsp;&nbsp;: &nbsp;{tgl(isi['selesai'])}")],
         [P("III", "tiny"), cell("Tiba di &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;:", "Pada Tanggal &nbsp;&nbsp;:"), cell("Berangkat dari &nbsp;&nbsp;&nbsp;&nbsp;:", "Ke &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;:", "Pada Tanggal &nbsp;&nbsp;&nbsp;:")],
@@ -350,7 +350,7 @@ def d_spd(isi: dict, st: dict, spds: list, mode: str = "srikandi") -> list:
         [P("V", "tiny"), cell(f"Tiba di &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;: &nbsp;{esc(asal)}", f"Pada Tanggal &nbsp;&nbsp;: &nbsp;{tgl(isi['selesai'])}"),
          cell("Telah diperiksa dengan keterangan bahwa perjalanan tersebut diatas perintahnya dan semata-mata untuk kepentingan jabatan dalam waktu yang sesingkat-singkatnya")],
     ]
-    bt = Table(back, colWidths=[0.9 * cm, 7.8 * cm, 8.0 * cm], rowHeights=[4.2 * cm, 3.1 * cm, 3.1 * cm, 3.1 * cm, 4.6 * cm])
+    bt = Table(back, colWidths=[0.9 * cm, 7.8 * cm, 8.0 * cm], rowHeights=[5.7 * cm, 2.9 * cm, 2.9 * cm, 2.9 * cm, 3.6 * cm])
     bt.setStyle(TableStyle([("BOX", (0, 0), (-1, -1), 0.9, colors.black), ("LINEBEFORE", (2, 0), (2, -1), 0.6, colors.black), ("LINEABOVE", (0, 1), (-1, -1), 0.5, colors.black),
                             ("VALIGN", (0, 0), (-1, -1), "TOP"), ("TOPPADDING", (0, 0), (-1, -1), 3)]))
     foot = Table([[P("VI", "tiny"), P("CATATAN LAIN-LAIN", "tiny")], [P("VII", "tiny"), [P("Perhatian:", "tiny"), P("PA/KPA yang menerbitkan SPD, Pegawai yang melakukan perjalanan dinas, para pejabat yang mengesahkan tanggal berangkat/tiba serta bendahara pengeluaran bertanggungjawab berdasarkan peraturan dan Perundang-Undangan Keuangan Negara/Daerah, apabila Negara/Daerah menderita/mengalami kerugian akibat kesalahan, kelalaian dan kealpaan.", "tiny")]]],
