@@ -1009,7 +1009,8 @@ async function bukaSpj(id, reload) {
 S.nmJenis = '';
 async function viewNomor(m) {
   const T = S.bokTahun, kepala = S.user.role === 'kepala';
-  const [jenis, daftar] = await Promise.all([api('/api/nomor/jenis'), api(`/api/nomor?tahun=${T}` + (S.nmJenis ? `&jenis=${S.nmJenis}` : ''))]);
+  const [jenis, daftar, kodeAll] = await Promise.all([api('/api/nomor/jenis'), api(`/api/nomor?tahun=${T}` + (S.nmJenis ? `&jenis=${S.nmJenis}` : '')), api('/api/kode-surat?semua=1')]);
+  const kelola = ['kepala', 'bendahara', 'bendahara_blud', 'pembuat_surat'].includes(S.user.role);
   const umum = jenis.filter(j => !j.kode.startsWith('ST-') && j.aktif);
   m.innerHTML = `<h3>Nomor surat umum &amp; kode penomoran</h3>
    <p class="muted">Pola nomor mengikuti contoh Srikandi: <code>klasifikasi/yymm-urut/unit/bulan-romawi/tahun</code>. Klasifikasi arsip menurut Permendagri 83/2022 (<b>000.1.2.3</b> = Perjalanan Dinas Pegawai; <b>000</b> = Umum); tata naskah menurut Permendagri 1/2023.
@@ -1023,12 +1024,38 @@ async function viewNomor(m) {
       <td>${n.status === 'Terbit' ? `${n.perihal.startsWith('(nomor dicadangkan') ? `<button class="btn small primary" data-perihal="${n.id}">Isi perihal</button> ` : ''}<button class="btn small danger" data-batal="${n.id}">Batalkan</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">Belum ada nomor surat umum pada tahun ini. Nomor Surat Tugas ada di menu Surat Tugas &amp; SPD.</td></tr>'}</tbody></table></div>
    <h3 style="margin-top:22px">Kode penomoran</h3>
    <div class="tbl-wrap"><table><thead><tr><th>Jenis</th><th>Klasifikasi</th><th>Kode unit</th><th>Contoh nomor berikutnya</th>${kepala ? '<th></th>' : ''}</tr></thead><tbody id="nKode"></tbody></table></div>
-   <p class="muted" style="font-size:.85em">Kode unit membedakan seri BOK / DAU / BLUD / Umum. Hanya Kepala Puskesmas yang dapat mengubah kode; perubahan berlaku untuk nomor berikutnya.</p>`;
+   <p class="muted" style="font-size:.85em">Kode unit membedakan seri BOK / DAU / BLUD / Umum. Hanya Kepala Puskesmas yang dapat mengubah kode; perubahan berlaku untuk nomor berikutnya.</p>
+   <h3 style="margin-top:22px">Database kode surat (klasifikasi arsip)</h3>
+   <p class="muted">Daftar kode klasifikasi yang bisa dipilih saat menerbitkan nomor surat. Tambah satu per satu atau <b>impor dari Excel/CSV</b> (kolom: Kode, Uraian).</p>
+   <div class="bar"><input id="ksCari" placeholder="Cari kode atau uraian…" style="max-width:280px"><span class="muted" id="ksJml"></span><span style="flex:1"></span>
+    <a class="btn small" href="/api/kode-surat/template">Template</a><a class="btn small" href="/api/kode-surat/ekspor">Ekspor Excel</a>${kelola ? '<button class="btn small" id="ksImp">Impor Excel/CSV</button><button class="btn small primary" id="ksBaru">+ Tambah kode</button>' : ''}</div>
+   <div class="tbl-wrap" style="max-height:340px;overflow:auto"><table><thead><tr><th>Kode</th><th>Uraian</th><th>Status</th>${kelola ? '<th></th>' : ''}</tr></thead><tbody id="ksTb"></tbody></table></div>
+   <datalist id="dlKode">${kodeAll.filter(k => k.aktif).map(k => `<option value="${esc(k.kode)}">${esc(k.uraian)}</option>`).join('')}</datalist>`;
+  const ksIsi = () => {
+    const q = ($('#ksCari').value || '').toLowerCase(), L = kodeAll.filter(k => !q || k.kode.toLowerCase().includes(q) || k.uraian.toLowerCase().includes(q));
+    $('#ksJml').textContent = `${L.length} dari ${kodeAll.length} kode`;
+    $('#ksTb').innerHTML = L.map(k => `<tr class="${k.aktif ? '' : 'batal'}"><td><code>${esc(k.kode)}</code></td><td>${esc(k.uraian)}</td><td>${k.aktif ? 'Aktif' : 'Nonaktif'}</td>${kelola ? `<td style="white-space:nowrap"><button class="btn small" data-ksu="${k.id}">Ubah</button> <button class="btn small danger" data-ksh="${k.id}">Hapus</button></td>` : ''}</tr>`).join('') || `<tr><td colspan="4" class="muted">Tidak ada kode.</td></tr>`;
+  };
   const hari = new Date().toISOString().slice(0, 10);
   const contoh = await Promise.all(jenis.map(j => api(`/api/nomor/pratinjau?jenis=${j.kode}&tanggal=${hari}`).then(r => r.nomor).catch(() => '–')));
   $('#nKode').innerHTML = jenis.map((j, i) => `<tr><td><b>${esc(j.nama)}</b><br><span class="muted" style="font-size:.82em">${esc(j.keterangan || '')}</span></td><td>${esc(j.klasifikasi)}</td><td>${esc(j.unit)}</td><td><code>${esc(contoh[i])}</code></td>
     ${kepala ? `<td><button class="btn small" data-kode="${j.kode}">Ubah</button></td>` : ''}</tr>`).join('');
   const reload = () => viewNomor(m);
+  ksIsi(); $('#ksCari').oninput = ksIsi;
+  const formKs = k => `<div class="grid2"><label>Kode<input name="kode" value="${esc(k?.kode || '')}" required maxlength="40" placeholder="mis. 800.1.11.1"></label><label>Status<select name="aktif"><option value="1">Aktif</option><option value="0" ${k && !k.aktif ? 'selected' : ''}>Nonaktif</option></select></label></div><label>Uraian<input name="uraian" value="${esc(k?.uraian || '')}" required minlength="2"></label>`;
+  if ($('#ksBaru')) $('#ksBaru').onclick = () => dialog('Tambah kode surat', formKs(), async d => { await api('/api/kode-surat', { method: 'POST', body: d }); toast('Kode ditambahkan.'); await reload(); });
+  if ($('#ksImp')) $('#ksImp').onclick = () => dialog('Impor kode surat', `<p class="muted">Berkas <b>.xlsx</b> atau <b>.csv</b>, kolom 1 = Kode, kolom 2 = Uraian (baris judul boleh ada). Kode yang sudah ada diperbarui uraiannya. Jika ada satu baris salah, seluruh impor dibatalkan. Gunakan <b>Template</b> agar kode seperti 000.1.2.3 tidak diubah Excel menjadi angka.</p><input type="file" name="berkas" accept=".xlsx,.csv,.txt" required>`,
+    async () => {
+      const file = $('#dlgForm input[type=file]').files[0]; if (!file) throw new Error('Pilih berkas.');
+      const b64 = btoa(new Uint8Array(await file.arrayBuffer()).reduce((x, b) => x + String.fromCharCode(b), ''));
+      const r = await api('/api/kode-surat/import', { method: 'POST', body: { file: b64 } });
+      toast(`Impor selesai: ${r.tambah} ditambah, ${r.ubah} diperbarui.`); await reload();
+    }, 'Impor');
+  $('#ksTb').onclick = e => {
+    const u = e.target.closest('[data-ksu]'), h = e.target.closest('[data-ksh]');
+    if (u) { const k = kodeAll.find(x => x.id === Number(u.dataset.ksu)); dialog('Ubah kode surat', formKs(k), async d => { await api('/api/kode-surat/' + k.id, { method: 'PUT', body: d }); toast('Kode disimpan.'); await reload(); }); }
+    if (h) { const k = kodeAll.find(x => x.id === Number(h.dataset.ksh)); dialog('Hapus kode?', `<p><code>${esc(k.kode)}</code> — ${esc(k.uraian)}<br>Nomor surat yang sudah terbit tidak terpengaruh. Untuk menyembunyikan dari pilihan, cukup <b>nonaktifkan</b>.</p>`, async () => { await api('/api/kode-surat/' + k.id, { method: 'DELETE' }); toast('Dihapus.'); await reload(); }, 'Hapus'); }
+  };
   $('#nTh').onchange = e => { S.bokTahun = Number(e.target.value) || T; reload(); };
   $('#nJn').onchange = e => { S.nmJenis = e.target.value; reload(); };
   $('#nGen').onclick = async () => {
@@ -1041,7 +1068,7 @@ async function viewNomor(m) {
   };
   $('#nBaru').onclick = () => {
     dialog('Terbitkan nomor surat', `<label>Jenis<select name="jenis">${umum.map(j => `<option value="${j.kode}">${esc(j.nama)}</option>`).join('')}</select></label>
-      <div class="grid2"><label>Tanggal surat<input name="tanggal" type="date" value="${hari}" required></label><label>Klasifikasi (boleh dirinci)<input name="klasifikasi" placeholder="${esc(umum[0]?.klasifikasi || '000')}"></label></div>
+      <div class="grid2"><label>Tanggal surat<input name="tanggal" type="date" value="${hari}" required></label><label>Klasifikasi (boleh dirinci)<input name="klasifikasi" list="dlKode" placeholder="${esc(umum[0]?.klasifikasi || '000')}"></label></div>
       <label>Perihal<input name="perihal" required></label><label>Tujuan / kepada (opsional)<input name="tujuan"></label>
       <div class="card" style="padding:10px">Nomor berikutnya: <b id="nPrev">…</b></div>`,
       async d => { const r = await api('/api/nomor', { method: 'POST', body: d }); toast('Nomor terbit: ' + r.nomor); await reload(); });
@@ -1053,7 +1080,7 @@ async function viewNomor(m) {
     const b = e.target.closest('[data-batal]'), k = e.target.closest('[data-kode]'), ph = e.target.closest('[data-perihal]');
     if (ph) dialog('Isi perihal nomor', '<label>Perihal<input name="perihal" required minlength="3"></label><label>Tujuan / kepada (opsional)<input name="tujuan"></label>', async d => { await api(`/api/nomor/${ph.dataset.perihal}/perihal`, { method: 'PUT', body: d }); toast('Perihal tersimpan.'); await reload(); });
     if (b) dialog('Batalkan nomor?', '<p>Nomor yang dibatalkan <b>tidak dipakai ulang</b>.</p><label>Alasan<input name="alasan" required minlength="5"></label>', async d => { await api(`/api/nomor/${b.dataset.batal}/batal`, { method: 'POST', body: d }); toast('Nomor dibatalkan.'); await reload(); }, 'Batalkan');
-    if (k) { const j = jenis.find(x => x.kode === k.dataset.kode); dialog('Kode penomoran — ' + j.nama, `<div class="grid2"><label>Klasifikasi arsip<input name="klasifikasi" value="${esc(j.klasifikasi)}" required></label><label>Kode unit<input name="unit" value="${esc(j.unit)}" required></label></div>
+    if (k) { const j = jenis.find(x => x.kode === k.dataset.kode); dialog('Kode penomoran — ' + j.nama, `<div class="grid2"><label>Klasifikasi arsip<input name="klasifikasi" list="dlKode" value="${esc(j.klasifikasi)}" required></label><label>Kode unit<input name="unit" value="${esc(j.unit)}" required></label></div>
       <label>Format<input name="format" value="${esc(j.format)}" required></label><p class="muted" style="font-size:.82em">Kode yang tersedia: {klasifikasi} {yymm} {urut} {unit} {bulan_romawi} {tahun}. Format wajib memuat {urut}.</p>`, async d => { await api('/api/nomor/jenis/' + j.kode, { method: 'PUT', body: d }); toast('Kode penomoran disimpan.'); await reload(); }); }
   };
 }

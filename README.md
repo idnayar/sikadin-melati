@@ -142,3 +142,6 @@ yang disetujui pada bulan itu dengan aturan yang sama + pemerataan beban; hasiln
 
 ## Identitas visual
 Lambang Kabupaten Kapuas dan logo UPT Puskesmas Melati ada di `frontend/public/brand/` (berkas milik Puskesmas).
+
+## Database kode surat (klasifikasi arsip)
+Menu *Surat → Nomor surat umum & kode* memuat **Database kode surat**: daftar kode klasifikasi (mis. `000.1.2.3` = Perjalanan Dinas Pegawai). Tambah/ubah/nonaktifkan/hapus **manual**, atau **impor Excel/CSV** (kolom Kode, Uraian; kode yang ada diperbarui; satu baris salah = seluruh impor batal; gunakan Template agar Excel tidak mengubah `000.1.2.3` menjadi angka). Ekspor Excel tersedia. Kode aktif menjadi pilihan (datalist) pada kolom Klasifikasi saat menerbitkan nomor dan mengubah kode penomoran. Pengelola: Kepala, Bendahara, Bendahara BLUD, Pembuat Surat; Pengelola Program hanya melihat. API: `/api/kode-surat`.
