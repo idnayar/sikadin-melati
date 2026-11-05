@@ -296,7 +296,7 @@ def _seed(con: sqlite3.Connection) -> None:
         ("kop_baris3", "UPT PUSKESMAS MELATI", "Kop surat baris 3"),
         ("kop_alamat", "Kecamatan Selat, Kuala Kapuas, Kabupaten Kapuas, Kalimantan Tengah", "Alamat pada kop"),
         ("format_nomor_st", "{no}/ST/PKM-MLT/{bulan_romawi}/{tahun}", "Format nomor Surat Tugas"),
-        ("panjar_maks_persen", "80", "Panjar maksimal % dari perkiraan biaya (Pasal 12 ayat 4)"),
+        ("panjar_maks_persen", "80", "(Tidak dipakai: fitur panjar dibatalkan oleh pemilik)"),
         ("lumpsum_inap_persen", "30", "Lumpsum maks. % tarif penginapan bila tidak menginap di hotel (Pasal 6 ayat 6)"),
         ("batas_hari_dinas_bulan", "10", "Peringatan bila total hari dinas luar seorang pegawai per bulan melebihi nilai ini (nilai awal — sesuaikan)"),
         ("batas_jam_dalam_kota", "8", "Dalam kota ≤ batas jam hanya uang transport lokal (Pasal 6 ayat 3)"),

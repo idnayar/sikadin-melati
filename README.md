@@ -38,7 +38,7 @@ Variabel lain: `SIKADIN_DB` (lokasi file database), `SIKADIN_DIST` (lokasi build
 - [x] 1. Master data & tarif Perbup
 - [x] 2. Pagu & RAB BOK 2027, Perencanaan BOK (RPK/POA)
 - [x] 3. Jadwal dinas luar + anti-doubling (kalender, bagi petugas otomatis, constraint DB)
-- [ ] 4. ST/SPD (format Srikandi)  - [ ] 5. Panjar & SPJ
+- [ ] 4. ST/SPD (format Srikandi)  - [ ] 5. Realisasi & SPJ (tanpa panjar — diputuskan pemilik)
 - [ ] 6. Rekap & laporan  - [ ] 7. Dashboard  - [ ] DAU/BLUD
 
 ## Catatan teknis
