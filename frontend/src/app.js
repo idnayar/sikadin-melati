@@ -299,7 +299,7 @@ async function viewRencana(m) {
 
   const aksi = r => {
     const b = (a, l, c = '') => `<button class="btn small ${c}" data-a="${a}" data-id="${r.id}">${l}</button>`;
-    if (r.status === 'Draft' && r.bisa_ubah) return [b('ubah', 'Ubah'), b('ajukan', 'Ajukan', 'primary'), b('hapus', 'Hapus', 'danger')].join(' ');
+    if (r.status === 'Draft' && r.bisa_ubah) return [b('ubah', 'Ubah'), (S.bisaSetuju && rw) ? b('ajukansetuju', 'Ajukan & setujui', 'primary') : b('ajukan', 'Ajukan', 'primary'), (S.bisaSetuju && rw) ? b('ajukan', 'Ajukan saja') : '', b('hapus', 'Hapus', 'danger')].join(' ');
     if (r.status === 'Diajukan') return [r.bisa_ubah ? b('tarik', 'Tarik') : '', (S.bisaSetuju && rw) ? b('setuju', 'Setujui', 'primary') + ' ' + b('tolak', 'Tolak', 'danger') : ''].join(' ');
     if (r.status === 'Ditolak' && r.bisa_ubah) return b('revisi', 'Revisi');
     if (r.status === 'Disetujui' && S.bisaSetuju && rw) return b('batal', 'Batalkan persetujuan');
@@ -393,6 +393,7 @@ async function viewRencana(m) {
       if (a === 'tambah') await formRencana();
       else if (a === 'ubah') await formRencana(r);
       else if (a === 'ajukan') await ubahStatus(id, 'Diajukan');
+      else if (a === 'ajukansetuju') { await api(`/api/rencana/${id}/status`, { method: 'POST', body: { ke: 'Diajukan' } }); await ubahStatus(id, 'Disetujui'); }
       else if (a === 'tarik' || a === 'revisi') await ubahStatus(id, 'Draft');
       else if (a === 'setuju') await ubahStatus(id, 'Disetujui');
       else if (a === 'batal') dialog('Batalkan persetujuan?', '<p>Rencana kembali ke Draft agar bisa diubah.</p>', async () => { await ubahStatus(id, 'Draft'); }, 'Batalkan');
