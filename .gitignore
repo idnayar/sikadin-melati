@@ -6,3 +6,5 @@ backend/.venv/
 __pycache__/
 *.pyc
 frontend/dist/
+SIKADIN-project.zip
+SIKADIN-project-dengan-data.zip

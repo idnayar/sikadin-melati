@@ -1,0 +1,18 @@
+# Untuk Render (Web Service, runtime Docker). Berjalan sebagai root karena disk Render di /data dimiliki root.
+FROM node:22-slim AS web
+WORKDIR /web
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
+
+FROM python:3.12-slim
+ENV PYTHONUNBUFFERED=1 SIKADIN_ENV=production SIKADIN_DB=/data/sikadin.db SIKADIN_DIST=/app/dist
+WORKDIR /app
+COPY backend/requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+COPY backend/app ./app
+COPY --from=web /web/dist ./dist
+EXPOSE 10000
+# Render memberi port lewat $PORT. Satu proses saja: sesi login disimpan di memori.
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-10000} --proxy-headers --forwarded-allow-ips='*'"]

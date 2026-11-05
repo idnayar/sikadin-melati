@@ -1,0 +1,19 @@
+# Render Blueprint: New + > Blueprint > pilih repo ini. Butuh paket berbayar (disk persisten); paket gratis TIDAK menyimpan data.
+services:
+  - type: web
+    name: sikadin
+    runtime: docker
+    dockerfilePath: ./Dockerfile.render
+    plan: starter
+    healthCheckPath: /api/health
+    disk:
+      name: sikadin-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: SIKADIN_ENV
+        value: production
+      - key: SIKADIN_DB
+        value: /data/sikadin.db
+      - key: SIKADIN_ADMIN_PASSWORD
+        sync: false        # diisi sendiri di dashboard Render (min. 10 karakter)

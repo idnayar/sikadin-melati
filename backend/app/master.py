@@ -447,6 +447,60 @@ def backup(user=Depends(auth), db=Depends(get_db)):
     return FileResponse(tmp, filename=f"sikadin_backup_{dt.date.today().isoformat()}.db", background=BackgroundTask(os.unlink, tmp))
 
 
+@router.post("/pulihkan")
+async def pulihkan(request: Request, user=Depends(auth)):
+    """Kepala: pulihkan seluruh database dari berkas backup (.db). Database saat ini disalin dulu ke folder data. Semua sesi login berakhir."""
+    import sqlite3
+    from . import admin
+    from .db import init_db
+    if user["role"] != "kepala":
+        raise Gagal("Hanya Kepala Puskesmas yang dapat memulihkan database.", 403)
+    data = await request.body()
+    if len(data) > 80 * 1024 * 1024:
+        raise Gagal("Berkas terlalu besar (maks. 80 MB).")
+    if not data.startswith(b"SQLite format 3"):
+        raise Gagal("Berkas bukan database SQLite (.db) hasil backup SIKADIN.")
+    tmp = os.path.join(tempfile.gettempdir(), f"sikadin_pulih_{int(time.time())}.db")
+    with open(tmp, "wb") as f:
+        f.write(data)
+    try:
+        src = sqlite3.connect(tmp)
+        src.row_factory = sqlite3.Row
+        if src.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+            raise Gagal("Berkas backup rusak (pemeriksaan integritas gagal).")
+        ada = {r[0] for r in src.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        if not {"users", "pegawai", "pengaturan", "sumber_dana", "bok_baris"} <= ada:
+            raise Gagal("Berkas ini bukan backup SIKADIN (tabel inti tidak lengkap).")
+        if core.produksi() and admin.akun_sandi_demo(src) and not (len(os.environ.get("SIKADIN_ADMIN_PASSWORD") or "") >= 10):
+            raise Gagal("Backup ini masih berisi akun bersandi demo. Atur variabel SIKADIN_ADMIN_PASSWORD (min. 10 karakter) di server terlebih dahulu.")
+        cadangan = DB_PATH.parent / f"sebelum-pulih-{dt.datetime.now():%Y%m%d-%H%M%S}.db"
+        live = sqlite3.connect(DB_PATH)
+        with sqlite3.connect(cadangan) as c2:
+            live.backup(c2)
+        live.close()
+        c2.close()
+        dest = sqlite3.connect(DB_PATH)
+        src.backup(dest)
+        dest.close()
+        src.close()
+    finally:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+    init_db()                       # migrasi skema bila backup berasal dari versi lama
+    con = core.connect()
+    admin.amankan_sandi_demo(con)
+    try:
+        con.execute("INSERT INTO audit_log(username,tabel,record_id,aksi,sumber) VALUES(?,?,?,?,?)", (user["username"], "sistem", 0, "PULIHKAN-DATABASE", None))
+        con.commit()
+    except Exception:  # noqa: BLE001
+        pass
+    con.close()
+    core.SESSIONS.clear()
+    return {"ok": True, "relogin": True, "cadangan": cadangan.name}
+
+
 @router.get("/riwayat")
 def riwayat(tabel: str | None = None, user=Depends(auth), db=Depends(get_db)):
     if not (bisa_tulis(user) or user["role"] == "bendahara_blud"):

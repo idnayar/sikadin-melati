@@ -23,6 +23,19 @@ def akun_sandi_demo(con) -> list[str]:
     return [u["username"] for u in con.execute("SELECT username, password_hash FROM users WHERE aktif=1").fetchall() if any(verify_password(p, u["password_hash"]) for p in SANDI_DEMO)]
 
 
+def amankan_sandi_demo(con) -> list[str]:
+    """Bila SIKADIN_ADMIN_PASSWORD (>=10 karakter, bukan sandi demo) diatur, akun yang masih bersandi demo diganti dengan sandi itu.
+    Dipakai saat start produksi dan setelah pemulihan database, agar server tidak pernah berjalan dengan sandi demo."""
+    pw = os.environ.get("SIKADIN_ADMIN_PASSWORD") or ""
+    if len(pw) < 10 or pw in SANDI_DEMO:
+        return []
+    ganti = akun_sandi_demo(con)
+    for u in ganti:
+        con.execute("UPDATE users SET password_hash=? WHERE username=?", (hash_password(pw), u))
+    con.commit()
+    return ganti
+
+
 def _acak() -> str:
     abjad = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
     return "".join(secrets.choice(abjad) for _ in range(14))

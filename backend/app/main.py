@@ -18,12 +18,13 @@ init_db()
 
 # Mode produksi (SIKADIN_ENV=production): cookie sesi hanya lewat HTTPS dan server menolak jalan bila masih ada akun bersandi demo.
 if core.produksi() and not os.environ.get("SIKADIN_IZINKAN_SANDI_DEMO"):
-    from .admin import akun_sandi_demo
+    from .admin import akun_sandi_demo, amankan_sandi_demo
     _c = core.connect()
+    amankan_sandi_demo(_c)   # bila SIKADIN_ADMIN_PASSWORD diatur: sandi demo diganti otomatis
     _sisa = akun_sandi_demo(_c)
     _c.close()
     if _sisa:
-        raise RuntimeError("Akun masih memakai sandi demo: " + ", ".join(_sisa) + ". Jalankan «python -m app.admin sandi-acak» (atau atur-sandi USERNAME) lalu mulai ulang.")
+        raise RuntimeError("Akun masih memakai sandi demo: " + ", ".join(_sisa) + ". Jalankan «python -m app.admin sandi-acak» (atau atur-sandi USERNAME), atau atur variabel SIKADIN_ADMIN_PASSWORD (min. 10 karakter), lalu mulai ulang.")
 
 
 @app.middleware("http")

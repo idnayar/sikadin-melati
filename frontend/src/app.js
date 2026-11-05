@@ -1032,9 +1032,20 @@ async function viewRiwayat(m) {
 function viewData(m) {
   m.innerHTML = `<h2>Backup & Ekspor</h2><div class="card" style="display:grid;gap:10px;max-width:520px">
    <div><b>Ekspor seluruh data ke Excel</b><p class="muted">Satu sheet per tabel master (plus riwayat untuk Kepala/Bendahara).</p><button class="btn primary" id="x1">Unduh Excel</button></div>
-   ${S.user.role === 'kepala' ? `<div><b>Backup database</b><p class="muted">Salinan utuh basis data (.db). Simpan di tempat aman secara berkala.</p><button class="btn" id="x2">Unduh backup</button></div>` : ''}</div>`;
+   ${S.user.role === 'kepala' ? `<div><b>Backup database</b><p class="muted">Salinan utuh basis data (.db). Simpan di tempat aman secara berkala.</p><button class="btn" id="x2">Unduh backup</button></div>
+   <div><b>Pulihkan database dari backup</b><p class="muted">Mengganti <b>seluruh</b> data dengan berkas backup (.db). Database saat ini disalin dulu di server; semua pengguna harus masuk lagi. Dipakai untuk memindahkan data ke server baru.</p><input type="file" id="x3f" accept=".db"> <button class="btn danger" id="x3">Pulihkan</button></div>` : ''}</div>`;
   $('#x1').onclick = () => download('/api/export/xlsx', 'sikadin_data.xlsx');
   if ($('#x2')) $('#x2').onclick = () => download('/api/backup', 'sikadin_backup.db');
+  if ($('#x3')) $('#x3').onclick = async () => {
+    const f = $('#x3f').files[0]; if (!f) return toast('Pilih berkas backup (.db) dahulu.', 1);
+    if (!confirm(`Ganti SELURUH data dengan isi "${f.name}"? Tindakan ini tidak dapat dibatalkan dari aplikasi (salinan data lama disimpan di server).`)) return;
+    try {
+      const r = await fetch('/api/pulihkan', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/octet-stream' }, body: f });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) return toast(j.error || 'Gagal memulihkan.', 1);
+      toast('Database dipulihkan. Silakan masuk kembali.'); setTimeout(() => location.reload(), 1200);
+    } catch (x) { toast(x.message, 1); }
+  };
 }
 
 // ---------- mulai ----------

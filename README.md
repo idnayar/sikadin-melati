@@ -21,9 +21,9 @@ Database `data/sikadin.db` dibuat & diisi data contoh otomatis saat backend pert
 (hapus folder `data/` untuk mengulang dari awal).
 
 ## Produksi (sikadin.pkmmelati.com)
-Panduan lengkap: [`deploy/PANDUAN-PENAYANGAN.md`](deploy/PANDUAN-PENAYANGAN.md) (Docker + Caddy, atau systemd; backup harian; tautan landing page).
+Render + cPanel: [`deploy/PANDUAN-RENDER-CPANEL.md`](deploy/PANDUAN-RENDER-CPANEL.md) (`render.yaml`, `Dockerfile.render`; wajib paket berbayar + disk). Server sendiri (VPS): [`deploy/PANDUAN-PENAYANGAN.md`](deploy/PANDUAN-PENAYANGAN.md) (Docker + Caddy, atau systemd; backup harian; tautan landing page).
 Ringkas: `SIKADIN_ENV=production` mewajibkan sandi demo diganti (`python -m app.admin sandi-acak`), mengaktifkan cookie HTTPS & header keamanan.
-Perintah admin: `python -m app.admin cek-sandi-demo | sandi-acak | atur-sandi USER | backup`. Variabel: `SIKADIN_DB`, `SIKADIN_DIST`, `SIKADIN_ENV`, `SIKADIN_ADMIN_PASSWORD` (sandi awal hanya untuk database baru).
+Perintah admin: `python -m app.admin cek-sandi-demo | sandi-acak | atur-sandi USER | backup`. `SIKADIN_ADMIN_PASSWORD` (≥10 karakter) di mode produksi otomatis mengganti sandi demo pada akun mana pun, termasuk setelah pemulihan database (menu Backup & Ekspor → Pulihkan, hanya Kepala). Variabel: `SIKADIN_DB`, `SIKADIN_DIST`, `SIKADIN_ENV`, `SIKADIN_ADMIN_PASSWORD` (sandi awal hanya untuk database baru).
 
 ## Akun contoh (GANTI lewat tombol "Ganti password")
 `kepala`, `bendahara`, `program`, `pegawai` — password awal ada di `backend/app/db.py` (bagian akun demo).
