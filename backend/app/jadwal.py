@@ -48,9 +48,51 @@ def _beban_bulan(db, pegawai_id, ym, excl=0) -> int:
     return db.execute("SELECT COUNT(*) c FROM penugasan_hari WHERE pegawai_id=? AND tanggal LIKE ? AND jadwal_id!=?", (pegawai_id, ym + "%", excl)).fetchone()["c"]
 
 
-def pegawai_bebas(db, hari: list[str], exclude: set[int], excl_jadwal=0, program=None) -> list[dict]:
-    """Pegawai aktif yang kosong (tanpa jadwal/cuti) pada SEMUA tanggal di `hari`, diurut dari beban terendah."""
+def peta_ruangan(db, dari: str, sampai: str, excl: int = 0, hitung_cuti: bool | None = None):
+    """Keadaan ruangan: jumlah pegawai aktif, batas maks. yang boleh keluar (cap), dan siapa yang sedang keluar per tanggal.
+    'Keluar' = dinas luar (penugasan_hari) + (opsional) cuti. Batas = floor(jumlah pegawai × persen)."""
+    if hitung_cuti is None:
+        hitung_cuti = _setting(db, "ruangan_hitung_cuti", 1) >= 1
+    persen = _setting(db, "batas_persen_ruangan", 50)
+    room_of = {p["id"]: p["ruangan"] for p in db.execute("SELECT id, ruangan FROM pegawai WHERE aktif=1 AND ruangan IS NOT NULL AND ruangan!=''").fetchall()}
+    size: dict[str, int] = {}
+    for r in room_of.values():
+        size[r] = size.get(r, 0) + 1
+    cap = {r: int(n * persen / 100 + 1e-9) for r, n in size.items()}
+    away: dict[str, dict[str, set]] = {r: {} for r in size}
+    for x in db.execute("SELECT pegawai_id, tanggal FROM penugasan_hari WHERE tanggal BETWEEN ? AND ? AND jadwal_id!=?", (dari, sampai, excl)).fetchall():
+        if x["pegawai_id"] in room_of:
+            away[room_of[x["pegawai_id"]]].setdefault(x["tanggal"], set()).add(x["pegawai_id"])
+    if hitung_cuti:
+        for c in db.execute("SELECT pegawai_id, mulai, selesai FROM cuti WHERE mulai<=? AND selesai>=?", (sampai, dari)).fetchall():
+            if c["pegawai_id"] in room_of:
+                for tg in _rentang(_tgl(max(c["mulai"], dari), "t"), _tgl(min(c["selesai"], sampai), "t")):
+                    away[room_of[c["pegawai_id"]]].setdefault(tg, set()).add(c["pegawai_id"])
+    return {"room_of": room_of, "size": size, "cap": cap, "away": away, "persen": persen}
+
+
+def _muat(peta, pid, hari) -> bool:
+    """Apakah ruangan `pid` masih sanggup ditinggal pada seluruh `hari` bila `pid` ikut pergi?"""
+    r = peta["room_of"].get(pid)
+    if r is None:
+        return True
+    return all(len(peta["away"][r].get(tg, set()) | {pid}) <= peta["cap"][r] for tg in hari)
+
+
+def _tandai(peta, pids, hari) -> None:
+    for pid in pids:
+        r = peta["room_of"].get(pid)
+        if r is not None:
+            for tg in hari:
+                peta["away"][r].setdefault(tg, set()).add(pid)
+
+
+def pegawai_bebas(db, hari: list[str], exclude: set[int], excl_jadwal=0, program=None, sudah: set[int] | None = None) -> list[dict]:
+    """Pegawai aktif yang kosong (tanpa jadwal/cuti) pada SEMUA tanggal di `hari` DAN yang ruangannya masih sanggup ditinggal
+    (batas % ruangan). `sudah` = petugas yang sudah dipilih (dihitung sebagai keluar). Diurut dari beban terendah."""
     ym = hari[0][:7]
+    peta = peta_ruangan(db, hari[0], hari[-1], excl_jadwal)
+    _tandai(peta, sudah if sudah is not None else exclude, hari)
     q = """SELECT p.id, p.nama, p.nip, p.tingkat, p.program, p.jabatan FROM pegawai p
         WHERE p.aktif=1 AND COALESCE(p.jabatan,'') NOT LIKE 'Kepala Puskesmas%'
         AND NOT EXISTS(SELECT 1 FROM penugasan_hari ph WHERE ph.pegawai_id=p.id AND ph.tanggal BETWEEN ? AND ? AND ph.jadwal_id!=?)
@@ -61,13 +103,28 @@ def pegawai_bebas(db, hari: list[str], exclude: set[int], excl_jadwal=0, program
         a += [program, program]
     out = []
     for p in db.execute(q, a).fetchall():
-        if p["id"] in exclude:
+        if p["id"] in exclude or not _muat(peta, p["id"], hari):
             continue
+        r = peta["room_of"].get(p["id"])
+        p["ruangan"] = r
+        p["rasio"] = round(max(len(peta["away"][r].get(tg, ())) + 1 for tg in hari) / peta["size"][r], 3) if r else 0
         p["beban_bulan"] = _beban_bulan(db, p["id"], ym, excl_jadwal)
         p["beban_tahun"] = db.execute("SELECT COUNT(*) c FROM penugasan_hari WHERE pegawai_id=? AND tanggal LIKE ?", (p["id"], ym[:4] + "%")).fetchone()["c"]
         out.append(p)
-    out.sort(key=lambda p: (p["beban_bulan"], p["beban_tahun"], p["nama"]))
+    out.sort(key=lambda p: (p["beban_bulan"], p["rasio"], p["beban_tahun"], p["nama"]))
     return out
+
+
+def pilih_otomatis(db, hari, jumlah, jangan: set[int], excl=0, program=None) -> tuple[list[dict], list[dict]]:
+    """Pilih `jumlah` petugas satu per satu; tiap pilihan dihitung ke batas ruangan pilihan berikutnya."""
+    dipilih: list[dict] = []
+    for _ in range(jumlah):
+        ada = pegawai_bebas(db, hari, jangan | {x["id"] for x in dipilih}, excl, program, sudah={x["id"] for x in dipilih})
+        if not ada:
+            break
+        dipilih.append(ada[0])
+    sisa = pegawai_bebas(db, hari, jangan | {x["id"] for x in dipilih}, excl, program, sudah={x["id"] for x in dipilih})
+    return dipilih, sisa[:5]
 
 
 def periksa(db, b: dict, excl: int = 0) -> dict:
@@ -160,6 +217,28 @@ def periksa(db, b: dict, excl: int = 0) -> dict:
             total = _beban_bulan(db, pid, ym, excl) + n
             if total > batas:
                 peringatan.append(f"{p['nama']}: total {total} hari dinas luar pada bulan {ym[5:]}/{ym[:4]} melebihi batas {int(batas)} hari.")
+
+    # --- (f) satu ruangan tidak boleh ditinggal lebih dari batas % pegawainya pada hari yang sama ---
+    peta = peta_ruangan(db, hari[0], hari[-1], excl)
+    per_ruang: dict[str, list[int]] = {}
+    for pid in petugas:
+        if pid in peta["room_of"]:
+            per_ruang.setdefault(peta["room_of"][pid], []).append(pid)
+    for room, pids in per_ruang.items():
+        lewat = [tg for tg in hari if len(peta["away"][room].get(tg, set()) | set(pids)) > peta["cap"][room]]
+        if not lewat:
+            continue
+        n, cap, persen = peta["size"][room], peta["cap"][room], int(peta["persen"])
+        tg0 = lewat[0]
+        keluar = peta["away"][room].get(tg0, set()) | set(pids)
+        if cap == 0:
+            pesan = f"Ruangan {room} hanya berisi {n} pegawai sehingga tidak boleh ditinggal (batas {persen}% = 0 orang)."
+        else:
+            pesan = (f"Ruangan {room} ({n} pegawai) akan ditinggal {len(keluar)} orang pada {_fmt(tg0)}"
+                     + (f" dan {len(lewat) - 1} hari lain" if len(lewat) > 1 else "") + f"; batas maksimal {cap} orang ({persen}%).")
+        G("ruangan", pesan, pids[0],
+          [{"id": x["id"], "nama": x["nama"], "tingkat": x["tingkat"], "beban_bulan": x["beban_bulan"]}
+           for x in pegawai_bebas(db, hari, set(petugas), excl)[:5]])
 
     # --- (b) kegiatan sama di lokasi sama pada tanggal sama ---
     for x in db.execute("""SELECT jh.tanggal, jh.jadwal_id, j.no_st FROM jadwal_hari jh JOIN jadwal j ON j.id=jh.jadwal_id
@@ -260,29 +339,193 @@ def saran(body: dict = Body(default={}), user=Depends(perlu_baca), db=Depends(ge
     if libur:
         raise Gagal(f"{_fmt(libur['tanggal'])} adalah hari libur ({libur['keterangan'] or 'libur'}).")
     n = max(1, int(body.get("jumlah") or 1))
-    ada = pegawai_bebas(db, hari, {int(x) for x in (body.get("kecuali") or [])}, int(body.get("id") or 0), body.get("program") or None)
-    return {"dipilih": ada[:n], "cadangan": ada[n:n + 5], "kurang": max(0, n - len(ada)), "tersedia": len(ada)}
+    dipilih, cadangan = pilih_otomatis(db, hari, n, {int(x) for x in (body.get("kecuali") or [])}, int(body.get("id") or 0), body.get("program") or None)
+    return {"dipilih": dipilih, "cadangan": cadangan, "kurang": max(0, n - len(dipilih)), "tersedia": len(dipilih) + len(cadangan)}
+
+
+def buat_jadwal(db, user, body: dict, catatan_otomatis: str | None = None) -> dict:
+    """Validasi lengkap lalu simpan sebagai jadwal 'Diusulkan'. Dipakai oleh input manual dan hasil generate otomatis."""
+    a = periksa(db, body)
+    if not a["ok"]:
+        raise Gagal(" ".join(g["pesan"] for g in a["galat"]), galat=[g["pesan"] for g in a["galat"]])
+    r, lok = a["_r"], a["_lok"]
+    db.execute("SAVEPOINT buat_jadwal")
+    try:
+        jid = db.execute("""INSERT INTO jadwal(rencana_id,tahun,baris_id,kegiatan,lokasi_id,sumber_dana_id,mulai,selesai,durasi,catatan,dibuat_oleh) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                         (r["id"], r["tahun"], r["baris_id"], r["kegiatan"], lok["id"], r["sumber_dana_id"], a["hari"][0], a["hari"][-1], a["_durasi"],
+                          str(body.get("catatan") or "").strip() or catatan_otomatis, user["username"])).lastrowid
+        _simpan_petugas(db, jid, a["_petugas"])
+        _tulis_hari(db, jid, a)
+        db.execute("RELEASE buat_jadwal")
+    except sqlite3.IntegrityError as e:
+        db.execute("ROLLBACK TO buat_jadwal")
+        db.execute("RELEASE buat_jadwal")
+        raise Gagal(_pesan_bentrok(e))
+    _sinkron_rencana(db, r["id"], user)
+    audit(db, user, "jadwal", jid, "TAMBAH", None, {"rencana_id": r["id"], "mulai": a["hari"][0], "selesai": a["hari"][-1], "lokasi_id": lok["id"], "petugas": a["_petugas"],
+                                                    **({"sumber": "generate otomatis"} if catatan_otomatis else {})})
+    return {"id": jid, "peringatan": a["peringatan"]}
 
 
 @router.post("")
 def tambah(body: dict = Body(default={}), user=Depends(perlu_baca), db=Depends(get_db)):
     if user["role"] == "pegawai":
         raise Gagal("Tidak ada akses.", 403)
-    a = periksa(db, body)
-    if not a["ok"]:
-        raise Gagal(" ".join(g["pesan"] for g in a["galat"]), galat=[g["pesan"] for g in a["galat"]])
-    r, lok = a["_r"], a["_lok"]
-    try:
-        jid = db.execute("""INSERT INTO jadwal(rencana_id,tahun,baris_id,kegiatan,lokasi_id,sumber_dana_id,mulai,selesai,durasi,catatan,dibuat_oleh) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
-                         (r["id"], r["tahun"], r["baris_id"], r["kegiatan"], lok["id"], r["sumber_dana_id"], a["hari"][0], a["hari"][-1], a["_durasi"],
-                          str(body.get("catatan") or "").strip() or None, user["username"])).lastrowid
-        _simpan_petugas(db, jid, a["_petugas"])
-        _tulis_hari(db, jid, a)
-    except sqlite3.IntegrityError as e:
-        raise Gagal(_pesan_bentrok(e))
-    _sinkron_rencana(db, r["id"], user)
-    audit(db, user, "jadwal", jid, "TAMBAH", None, {"rencana_id": r["id"], "mulai": a["hari"][0], "selesai": a["hari"][-1], "lokasi_id": lok["id"], "petugas": a["_petugas"]})
-    return {"id": jid, "peringatan": a["peringatan"]}
+    return buat_jadwal(db, user, body)
+
+
+# ======================================================================================
+#  GENERATE JADWAL BULANAN
+#  Menyusun usulan jadwal satu bulan untuk semua rencana yang sudah disetujui, dengan syarat:
+#   - hanya hari kerja & bukan libur; satu pelaksanaan = hari berurutan sebanyak jumlah_hari rencana
+#   - pegawai tidak bentrok (tanggal), tidak cuti; kegiatan+lokasi+tanggal tidak dobel
+#   - satu ruangan tidak ditinggal > batas % pegawainya pada hari yang sama (default 50%)
+#   - beban dibagi merata (pegawai dengan hari dinas paling sedikit dipilih dulu) & tanggal disebar
+# ======================================================================================
+def _hari_kerja(d: dt.date, hk: int) -> bool:
+    return d.weekday() < hk
+
+
+def generate(db, tahun: int, bulan: int, rencana_ids=None, hari_kerja=5, hitung_cuti=True, ruangan=None) -> dict:
+    awal = dt.date(tahun, bulan, 1)
+    akhir = (dt.date(tahun + (bulan == 12), bulan % 12 + 1, 1) - dt.timedelta(days=1))
+    semua = _rentang(awal, akhir)
+    libur = {x["tanggal"] for x in db.execute("SELECT tanggal FROM libur WHERE tanggal BETWEEN ? AND ?", (semua[0], semua[-1])).fetchall()}
+    peta = peta_ruangan(db, semua[0], semua[-1], 0, hitung_cuti)
+    busy: dict[int, set] = {}
+    beban: dict[int, int] = {}
+    for x in db.execute("SELECT pegawai_id, tanggal FROM penugasan_hari WHERE tanggal BETWEEN ? AND ?", (semua[0], semua[-1])).fetchall():
+        busy.setdefault(x["pegawai_id"], set()).add(x["tanggal"])
+        beban[x["pegawai_id"]] = beban.get(x["pegawai_id"], 0) + 1
+    cuti: dict[int, set] = {}
+    for c in db.execute("SELECT pegawai_id, mulai, selesai FROM cuti WHERE mulai<=? AND selesai>=?", (semua[-1], semua[0])).fetchall():
+        cuti.setdefault(c["pegawai_id"], set()).update(tg for tg in semua if c["mulai"] <= tg <= c["selesai"])
+    kl = {(x["baris_id"], x["lokasi_id"], x["tanggal"]) for x in db.execute("SELECT baris_id, lokasi_id, tanggal FROM jadwal_hari WHERE tanggal BETWEEN ? AND ?", (semua[0], semua[-1])).fetchall()}
+    harian = {tg: sum(len(peta["away"][r].get(tg, ())) for r in peta["away"]) for tg in semua}   # orang yang sedang keluar per hari
+    batas_bulan = _setting(db, "batas_hari_dinas_bulan", 10)
+    pool = [p for p in db.execute("SELECT id, nama, ruangan, tingkat FROM pegawai WHERE aktif=1 AND COALESCE(jabatan,'') NOT LIKE 'Kepala Puskesmas%'").fetchall()
+            if not ruangan or p["ruangan"] in ruangan]
+
+    q = """SELECT r.*, l.nama lokasi_nama, (SELECT COUNT(*) FROM jadwal j WHERE j.rencana_id=r.id AND j.status IN ('Diusulkan','Disetujui','Terlaksana')) terjadwal
+           FROM rencana r LEFT JOIN lokasi l ON l.id=r.lokasi_id WHERE r.tahun=? AND r.bulan=? AND r.status IN ('Disetujui','Terjadwal')"""
+    daftar = db.execute(q, (tahun, bulan)).fetchall()
+    if rencana_ids:
+        daftar = [r for r in daftar if r["id"] in set(rencana_ids)]
+    daftar.sort(key=lambda r: (-(r["jumlah_petugas"] * r["jumlah_hari"]), r["id"]))
+
+    usulan, gagal = [], []
+    for r in daftar:
+        sisa = r["frekuensi"] - r["terjadwal"]
+        if sisa <= 0:
+            continue
+        if not r["lokasi_id"]:
+            gagal.append({"rencana_id": r["id"], "kegiatan": r["kegiatan"], "jumlah": sisa, "alasan": "Rencana tidak punya lokasi tujuan (bukan perjalanan dinas) — jadwalkan manual."})
+            continue
+        h, n = r["jumlah_hari"], r["jumlah_petugas"]
+        mulai_sebelumnya: list[dt.date] = []
+        for ke in range(1, sisa + 1):
+            jendela = []
+            for i in range(len(semua) - h + 1):
+                w = semua[i:i + h]
+                if all(_hari_kerja(dt.date.fromisoformat(tg), hari_kerja) and tg not in libur and (r["baris_id"], r["lokasi_id"], tg) not in kl for tg in w):
+                    skor = sum(harian[tg] for tg in w) * 100 + i
+                    d0 = dt.date.fromisoformat(w[0])
+                    if any(abs((d0 - s).days) <= h + 1 for s in mulai_sebelumnya):
+                        skor += 500          # sebar pelaksanaan rencana yang sama
+                    jendela.append((skor, w))
+            jendela.sort(key=lambda x: x[0])
+            sebab = {"tanpa_jendela": not jendela, "ruangan": False, "petugas": False}
+            hasil = None
+            for keras in (True, False):       # putaran 1: hormati batas hari dinas/bulan; putaran 2: boleh melebihi (diberi peringatan)
+                for _, w in jendela:
+                    pilih: list[dict] = []
+                    bebas_tanpa_cap = 0
+                    for p in sorted(pool, key=lambda p: (beban.get(p["id"], 0), p["nama"])):
+                        pid = p["id"]
+                        if busy.get(pid, set()) & set(w) or cuti.get(pid, set()) & set(w):
+                            continue
+                        if keras and beban.get(pid, 0) + h > batas_bulan:
+                            continue
+                        bebas_tanpa_cap += 1
+                        if not _muat(peta, pid, w):
+                            continue
+                        pilih.append(p)
+                        _tandai(peta, [pid], w)        # hitung sementara agar petugas berikutnya satu ruangan ikut dibatasi
+                        if len(pilih) == n:
+                            break
+                    if len(pilih) == n:
+                        hasil = (w, pilih, not keras)
+                        break
+                    for p in pilih:                    # batal: kembalikan penandaan sementara
+                        rr = peta["room_of"].get(p["id"])
+                        if rr:
+                            for tg in w:
+                                peta["away"][rr].get(tg, set()).discard(p["id"])
+                    if bebas_tanpa_cap >= n:
+                        sebab["ruangan"] = True
+                    else:
+                        sebab["petugas"] = True
+                if hasil:
+                    break
+            if not hasil:
+                alasan = ("Tidak ada hari kerja yang cocok (libur/akhir pekan/kegiatan sudah terjadwal)." if sebab["tanpa_jendela"] else
+                          f"Batas {int(peta['persen'])}% pegawai per ruangan membuat {n} petugas tidak bisa dipenuhi." if sebab["ruangan"] else
+                          f"Petugas yang kosong kurang dari {n} orang pada hari-hari yang tersedia.")
+                gagal.append({"rencana_id": r["id"], "kegiatan": r["kegiatan"], "jumlah": sisa - ke + 1, "alasan": alasan})
+                break
+            w, pilih, lewat = hasil
+            for p in pilih:
+                busy.setdefault(p["id"], set()).update(w)
+                beban[p["id"]] = beban.get(p["id"], 0) + h
+            for tg in w:
+                harian[tg] += len(pilih)
+                kl.add((r["baris_id"], r["lokasi_id"], tg))
+            mulai_sebelumnya.append(dt.date.fromisoformat(w[0]))
+            usulan.append({"rencana_id": r["id"], "kegiatan": r["kegiatan"], "ke": r["terjadwal"] + ke, "dari": r["frekuensi"], "lokasi_id": r["lokasi_id"], "lokasi": r["lokasi_nama"],
+                           "mulai": w[0], "selesai": w[-1], "durasi": r["durasi"] or "gt8", "petugas": [{"id": p["id"], "nama": p["nama"], "ruangan": p["ruangan"]} for p in pilih],
+                           "peringatan": ["Beban petugas melebihi batas hari dinas bulanan."] if lewat else []})
+    usulan.sort(key=lambda u: (u["mulai"], u["rencana_id"]))
+    dampak = []
+    for room, n in sorted(peta["size"].items()):
+        puncak = max(((len(s), tg) for tg, s in peta["away"][room].items()), default=(0, None))
+        dampak.append({"ruangan": room, "pegawai": n, "batas": peta["cap"][room], "puncak": puncak[0], "tanggal": puncak[1],
+                       "persen": round(puncak[0] / n * 100) if n else 0})
+    dampak.sort(key=lambda d: (-d["persen"], d["ruangan"]))
+    petugas_hari = {}
+    for u in usulan:
+        for p in u["petugas"]:
+            petugas_hari[p["id"]] = petugas_hari.get(p["id"], 0) + (dt.date.fromisoformat(u["selesai"]) - dt.date.fromisoformat(u["mulai"])).days + 1
+    nama = {p["id"]: p["nama"] for p in pool}
+    return {"tahun": tahun, "bulan": bulan, "usulan": usulan, "gagal": gagal, "dampak": dampak, "persen": peta["persen"],
+            "sebaran": sorted(({"id": i, "nama": nama.get(i, "?"), "hari": n} for i, n in petugas_hari.items()), key=lambda x: -x["hari"])[:8],
+            "ringkas": {"jadwal": len(usulan), "gagal": sum(g["jumlah"] for g in gagal), "petugas": len(petugas_hari)}}
+
+
+@router.post("/generate")
+def api_generate(body: dict = Body(default={}), user=Depends(perlu_baca), db=Depends(get_db)):
+    if user["role"] == "pegawai":
+        raise Gagal("Tidak ada akses.", 403)
+    tahun, bulan = int(body.get("tahun") or 0), int(body.get("bulan") or 0)
+    if not (tahun and 1 <= bulan <= 12):
+        raise Gagal("Pilih bulan dan tahun.")
+    return generate(db, tahun, bulan, [int(x) for x in body.get("rencana_ids") or []] or None, 6 if int(body.get("hari_kerja") or 5) == 6 else 5,
+                    None, body.get("ruangan") or None)
+
+
+@router.post("/generate/simpan")
+def api_generate_simpan(body: dict = Body(default={}), user=Depends(perlu_baca), db=Depends(get_db)):
+    """Simpan hasil pratinjau sebagai jadwal 'Diusulkan'. Tiap item divalidasi ulang (aturan sama dengan input manual)."""
+    if user["role"] == "pegawai":
+        raise Gagal("Tidak ada akses.", 403)
+    ok, gagal = [], []
+    for it in body.get("items") or []:
+        try:
+            res = buat_jadwal(db, user, {"rencana_id": it["rencana_id"], "mulai": it["mulai"], "selesai": it["selesai"], "lokasi_id": it["lokasi_id"],
+                                         "durasi": it.get("durasi"), "petugas": [p["id"] if isinstance(p, dict) else p for p in it["petugas"]]}, "Dibuat otomatis (generate bulanan)")
+            ok.append(res["id"])
+        except Gagal as e:
+            gagal.append({"kegiatan": it.get("kegiatan"), "mulai": it.get("mulai"), "alasan": e.pesan})
+    return {"tersimpan": len(ok), "gagal": gagal}
 
 
 def _pesan_bentrok(e) -> str:

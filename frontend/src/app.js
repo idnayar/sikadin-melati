@@ -452,7 +452,7 @@ async function viewJadwal(m) {
   m.innerHTML = `<h2>Jadwal Dinas Luar</h2>
   <p class="muted">Jadwal dibuat dari rencana yang sudah disetujui. Sistem menolak bentrok petugas, kegiatan ganda, tanggal libur/cuti, dan uang harian ganda lintas sumber dana.</p>
   <div class="bar"><button class="btn" id="jPrev" aria-label="Bulan sebelumnya">‹</button><b style="min-width:150px;text-align:center">${BLN[M - 1]} ${Y}</b><button class="btn" id="jNext" aria-label="Bulan berikutnya">›</button><button class="btn small" id="jNow">Bulan ini</button>
-   <span style="flex:1"></span>${rw ? '<button class="btn primary" id="jAdd">+ Jadwal</button>' : ''}</div>
+   <span style="flex:1"></span>${rw ? '<button class="btn" id="jGen">⚙ Generate bulanan</button><button class="btn primary" id="jAdd">+ Jadwal</button>' : ''}</div>
   <div class="bar filt">
    <select id="fPeg"><option value="">Semua pegawai</option>${pegAktif.map(p => opt(p.id, namaSingkat(p.nama), F.pegawai_id)).join('')}</select>
    <select id="fLok"><option value="">Semua lokasi</option>${S.refs.lokasi.filter(l => l.aktif).map(l => opt(l.id, l.nama, F.lokasi_id)).join('')}</select>
@@ -471,10 +471,52 @@ async function viewJadwal(m) {
   [['fPeg', 'pegawai_id'], ['fLok', 'lokasi_id'], ['fProg', 'program'], ['fDana', 'sumber_dana_id'], ['fSt', 'status']].forEach(([id, k]) => $('#' + id).onchange = e => { S.jwF[k] = e.target.value; reload(); });
   m.querySelectorAll('[data-tab]').forEach(t => t.onclick = () => { S.jwTab = t.dataset.tab; reload(); });
   if ($('#jAdd')) $('#jAdd').onclick = () => formJadwal(null, dari);
+  if ($('#jGen')) $('#jGen').onclick = () => formGenerate().catch(x => toast(x.message, 1));
   m.onclick = e => {
     const c = e.target.closest('[data-j],[data-det]'); if (c) { const j = list.find(x => x.id === Number(c.dataset.j || c.dataset.det)); if (j) detail(j); return; }
     const dEl = e.target.closest('.day[data-d]'); if (dEl && rw && !e.target.closest('.chip')) formJadwal(null, dEl.dataset.d);
   };
+
+  // ----- generate jadwal bulanan -----
+  async function formGenerate() {
+    const siap = (await api(`/api/jadwal/rencana-siap?tahun=${Y}`)).filter(r => r.bulan === M);
+    const pen = await api('/api/data/pengaturan'), persen = (pen.find(x => x.kunci === 'batas_persen_ruangan') || {}).nilai || 50;
+    if (!siap.length) return toast(`Tidak ada rencana Disetujui untuk ${BLN[M - 1]} ${Y} yang masih perlu dijadwalkan. Setujui rencana di menu Perencanaan.`, 1);
+    dialog(`Generate Jadwal ${BLN[M - 1]} ${Y}`, `
+      <p class="muted">Sistem menyusun usulan jadwal otomatis. Aturan: tanpa bentrok petugas, tanpa kegiatan ganda di lokasi &amp; tanggal yang sama, di luar libur &amp; cuti,
+        beban petugas dibagi merata, dan <b>satu ruangan tidak boleh ditinggal lebih dari ${esc(persen)}% pegawainya</b> pada hari yang sama. Hasil ditampilkan dulu sebagai pratinjau.</p>
+      <label>Hari kerja<select name="hari_kerja"><option value="5">Senin – Jumat</option><option value="6">Senin – Sabtu</option></select></label>
+      <div><div class="bar" style="margin:4px 0"><b>Rencana yang dijadwalkan</b><span style="flex:1"></span><button type="button" class="btn small" id="gAll">Pilih semua</button><button type="button" class="btn small" id="gNone">Kosongkan</button></div>
+       <div class="plist">${siap.map(r => `<label class="prow on"><input type="checkbox" data-r="${r.id}" checked><span><b>${esc(r.kegiatan.slice(0, 80))}</b>
+         <span class="muted"> · ${esc(r.lokasi || 'tanpa lokasi')} · ${r.jumlah_petugas} petugas × ${r.jumlah_hari} hr · ${r.frekuensi - r.terjadwal} pelaksanaan tersisa</span></span></label>`).join('')}</div></div>`,
+      async d => {
+        const ids = [...document.querySelectorAll('#dlgForm [data-r]:checked')].map(x => Number(x.dataset.r));
+        if (!ids.length) throw new Error('Pilih minimal satu rencana.');
+        const g = await api('/api/jadwal/generate', { method: 'POST', body: { tahun: Y, bulan: M, rencana_ids: ids, hari_kerja: Number(d.hari_kerja) } });
+        setTimeout(() => pratinjau(g), 150);
+      }, 'Buat pratinjau');
+    $('#gAll').onclick = () => document.querySelectorAll('#dlgForm [data-r]').forEach(x => x.checked = true);
+    $('#gNone').onclick = () => document.querySelectorAll('#dlgForm [data-r]').forEach(x => x.checked = false);
+  }
+  function pratinjau(g) {
+    const r = g.ringkas;
+    dialog('Pratinjau Jadwal ' + BLN[g.bulan - 1] + ' ' + g.tahun, `<div id="gen">
+      <div class="kv" style="margin:0"><div class="card"><span class="muted">Jadwal tersusun</span><b>${r.jadwal}</b></div><div class="card"><span class="muted">Petugas terlibat</span><b>${r.petugas}</b></div>
+       <div class="card"><span class="muted">Tidak bisa dijadwalkan</span><b class="${r.gagal ? 'err' : 'okc'}">${r.gagal}</b></div></div>
+      ${g.gagal.length ? `<div class="gal">${g.gagal.map(x => `<p class="err">✖ ${esc(x.kegiatan.slice(0, 70))} (${x.jumlah}×): ${esc(x.alasan)}</p>`).join('')}</div>` : ''}
+      <details open><summary><b>Jadwal usulan (${g.usulan.length})</b></summary><div class="tbl-wrap"><table><thead><tr><th>Tanggal</th><th>Kegiatan</th><th>Lokasi</th><th>Petugas (ruangan)</th></tr></thead><tbody>
+       ${g.usulan.map(u => `<tr><td style="white-space:nowrap">${tglID(u.mulai).slice(0, 5)}${u.selesai !== u.mulai ? '–' + tglID(u.selesai).slice(0, 5) : ''}</td><td>${esc(u.kegiatan.slice(0, 60))}<br><span class="muted">pelaksanaan ${u.ke}/${u.dari}</span></td><td>${esc(u.lokasi.replace(/^Kelurahan /, 'Kel. '))}</td>
+        <td style="font-size:.85em">${u.petugas.map(p => `${esc(p.nama.split(',')[0])} <span class="muted">(${esc(p.ruangan || '–')})</span>`).join(', ')}${u.peringatan.map(w => `<br><span class="warn">⚠ ${esc(w)}</span>`).join('')}</td></tr>`).join('')}</tbody></table></div></details>
+      <details><summary><b>Dampak ke ruangan</b> <span class="muted">(puncak pegawai yang meninggalkan ruangan; batas ${g.persen}%)</span></summary><div class="tbl-wrap"><table><thead><tr><th>Ruangan</th><th>Pegawai</th><th>Puncak keluar</th><th></th></tr></thead><tbody>
+       ${g.dampak.map(d => `<tr><td>${esc(d.ruangan)}</td><td>${d.pegawai}</td><td>${d.puncak} orang${d.tanggal ? ' · ' + tglID(d.tanggal).slice(0, 5) : ''}</td><td style="min-width:110px"><div class="bar-meter"><i style="width:${Math.min(100, d.persen)}%" class="${d.persen > g.persen ? 'bad' : ''}"></i></div><small>${d.persen}%</small></td></tr>`).join('')}</tbody></table></div></details>
+      <details><summary><b>Sebaran beban petugas</b> <span class="muted">(hari dinas terbanyak)</span></summary><p style="font-size:.88em">${g.sebaran.map(s => `${esc(s.nama.split(',')[0])}: ${s.hari} hr`).join(' · ')}</p></details></div>`,
+      async () => {
+        if (!g.usulan.length) throw new Error('Tidak ada jadwal untuk disimpan.');
+        const res = await api('/api/jadwal/generate/simpan', { method: 'POST', body: { items: g.usulan } });
+        toast(`${res.tersimpan} jadwal disimpan sebagai usulan.` + (res.gagal.length ? ` ${res.gagal.length} gagal: ${res.gagal[0].alasan}` : ''), !!res.gagal.length);
+        S.jwYM = `${g.tahun}-${pad(g.bulan)}`; await reload();
+      }, `Simpan ${g.usulan.length} usulan`);
+  }
 
   // ----- form jadwal + pengecekan bentrok real-time -----
   async function formJadwal(j, tglAwal) {

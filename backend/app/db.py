@@ -118,6 +118,13 @@ BEGIN SELECT RAISE(ABORT, 'CUTI'); END;
 """
 
 
+# Pengaturan yang ditambahkan setelah rilis awal (ditambahkan otomatis ke database lama)
+PENGATURAN_BARU = [
+    ("batas_persen_ruangan", "50", "Maks. % pegawai satu ruangan yang boleh meninggalkan ruangan (dinas luar/cuti) pada hari yang sama"),
+    ("ruangan_hitung_cuti", "1", "1 = pegawai cuti dihitung sebagai tidak berada di ruangan; 0 = hanya dinas luar yang dihitung"),
+]
+
+
 def _dict_factory(cur, row):
     return {c[0]: row[i] for i, c in enumerate(cur.description)}
 
@@ -175,6 +182,8 @@ def init_db() -> None:
             con.execute(f"ALTER TABLE pegawai ADD COLUMN {kol} TEXT")
     if con.execute("SELECT COUNT(*) c FROM pegawai").fetchone()["c"] == 0:
         _seed(con)
+    for k, v, ket in PENGATURAN_BARU:  # database lama: tambahkan pengaturan baru bila belum ada
+        con.execute("INSERT OR IGNORE INTO pengaturan(kunci,nilai,keterangan) VALUES(?,?,?)", (k, v, ket))
     con.commit()
     con.close()
 
@@ -258,6 +267,7 @@ def _seed(con: sqlite3.Connection) -> None:
         ("batas_jam_dalam_kota", "8", "Dalam kota ≤ batas jam hanya uang transport lokal (Pasal 6 ayat 3)"),
         ("min_rombongan_sewa", "3", "Minimal rombongan untuk sewa kendaraan (Pasal 6 ayat 5)"),
         ("ambang_pagu_peringatan", "10", "Peringatan bila sisa pagu < % ini"),
+        *PENGATURAN_BARU,
     ])
     many("INSERT INTO pejabat(peran,nama,nip,pangkat,jabatan) VALUES(?,?,?,?,?)", [
         ("Penandatangan ST / KPA", "dr. Rina Marlina", "198005122008012001", "Pembina (IV/a)", "Kepala UPT Puskesmas Melati"),

@@ -51,8 +51,16 @@ Variabel lain: `SIKADIN_DB` (lokasi file database), `SIKADIN_DIST` (lokasi build
 Laporan keuangan harus mengikuti **PSAP Nomor 13 — Penyajian Laporan Keuangan Badan Layanan Umum**
 (PMK 217/PMK.05/2015). Komponennya ada tujuh: Laporan Realisasi Anggaran, Laporan Perubahan Saldo Anggaran Lebih,
 Neraca, Laporan Operasional, Laporan Arus Kas, Laporan Perubahan Ekuitas, dan Catatan atas Laporan Keuangan.
-Neraca/LO/LAK/LPE memerlukan data di luar perjalanan dinas (kas, pendapatan BLUD, persediaan, aset tetap, utang);
-ruang lingkupnya perlu diputuskan sebelum Tahap 6 dikerjakan.
+Neraca/LO/LAK/LPE memerlukan data di luar perjalanan dinas (kas, pendapatan BLUD, persediaan, aset tetap, utang).
+**Keputusan pemilik (2026-11-05): laporan mencakup ketujuh komponen dan semua sumber anggaran (DAU, BOK, BLUD).**
+Dikerjakan setelah penjadwalan/ST/SPJ; perlu saldo awal dari bendahara/akuntan.
+
+## Aturan penjadwalan (Tahap 3)
+Divalidasi di server dan dikunci constraint database: (a) satu pegawai satu penugasan per tanggal (juga mencegah uang harian ganda
+lintas sumber dana), (b) kegiatan + lokasi + tanggal tidak boleh dobel, (c) bukan hari libur/cuti, (d) satu ruangan tidak
+ditinggal lebih dari 50% pegawainya per hari (`batas_persen_ruangan` di Pengaturan; cuti ikut dihitung bila `ruangan_hitung_cuti`=1),
+(e) peringatan bila hari dinas luar sebulan melebihi batas. **Generate jadwal bulanan** menyusun usulan untuk semua rencana
+yang disetujui pada bulan itu dengan aturan yang sama + pemerataan beban; hasilnya pratinjau dulu, lalu disimpan sebagai usulan.
 
 ## Identitas visual
 Lambang Kabupaten Kapuas dan logo UPT Puskesmas Melati ada di `frontend/public/brand/` (berkas milik Puskesmas).

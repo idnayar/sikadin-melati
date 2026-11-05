@@ -149,3 +149,6 @@ p.okc{color:var(--ok);margin:2px 0}
   .cal{display:block}.cal-h,.day.pad,.day.kosong{display:none}
   .day{min-height:0;border-right:0;flex-direction:column}.dw{display:inline}.chip{white-space:normal}
 }
+dialog:has(#gen),dialog:has(#gAll){width:min(900px,96vw)}
+#gen details{margin:10px 0}#gen summary{cursor:pointer;padding:6px 0}
+.bar-meter{height:8px;background:var(--line);border-radius:99px;overflow:hidden}.bar-meter i{display:block;height:100%;background:var(--primary)}.bar-meter i.bad{background:var(--err)}
