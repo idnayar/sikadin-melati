@@ -12,6 +12,15 @@ async function api(url, opt = {}) {
   if (!r.ok) { const e = new Error(j.error || 'Terjadi kesalahan.'); e.galat = j.galat; throw e; }
   return j;
 }
+const cp = t => `<button type="button" class="salin" data-salin="${esc(t)}" title="Salin nomor" aria-label="Salin nomor">⧉ Salin</button>`;
+async function salin(t) {
+  try { await navigator.clipboard.writeText(t); } catch {
+    const a = document.createElement('textarea'); a.value = t; a.style.cssText = 'position:fixed;opacity:0'; document.body.appendChild(a); a.select();
+    try { document.execCommand('copy'); } catch { toast('Gagal menyalin; salin manual.', 1); a.remove(); return; } a.remove();
+  }
+  toast('Tersalin: ' + t);
+}
+document.addEventListener('click', e => { const b = e.target.closest('[data-salin]'); if (b) { e.preventDefault(); e.stopPropagation(); salin(b.dataset.salin); } }, true);
 function toast(msg, bad) { const t = $('#toast'); t.textContent = msg; t.className = 'toast show' + (bad ? ' bad' : ''); clearTimeout(toast.t); toast.t = setTimeout(() => t.className = 'toast', 3500); }
 async function download(url, name) {
   const r = await fetch(url, { credentials: 'same-origin' });
@@ -1019,7 +1028,7 @@ async function viewNomor(m) {
     <select id="nJn"><option value="">Semua jenis</option>${jenis.map(j => `<option value="${j.kode}" ${S.nmJenis === j.kode ? 'selected' : ''}>${esc(j.nama)}</option>`).join('')}</select><span style="flex:1"></span>
     <button class="btn" id="nGen" title="Langsung dapat nomor berikutnya (perihal diisi nanti)">⚡ Generate nomor otomatis</button><button class="btn primary" id="nBaru">+ Terbitkan nomor surat</button></div>
    <div class="tbl-wrap"><table><thead><tr><th>Nomor</th><th>Tanggal</th><th>Perihal / tujuan</th><th>Status</th><th></th></tr></thead><tbody>
-    ${daftar.map(n => `<tr class="${n.status === 'Dibatalkan' ? 'batal' : ''}"><td style="white-space:nowrap"><b>${esc(n.nomor)}</b></td><td>${tglID(n.tanggal)}</td><td>${esc(n.perihal)}${n.tujuan ? `<br><span class="muted">kepada ${esc(n.tujuan)}</span>` : ''}</td>
+    ${daftar.map(n => `<tr class="${n.status === 'Dibatalkan' ? 'batal' : ''}"><td style="white-space:nowrap"><b>${esc(n.nomor)}</b> ${cp(n.nomor)}</td><td>${tglID(n.tanggal)}</td><td>${esc(n.perihal)}${n.tujuan ? `<br><span class="muted">kepada ${esc(n.tujuan)}</span>` : ''}</td>
       <td><span class="badge ${n.status === 'Terbit' ? 'st-Disetujui' : 'st-Dibatalkan'}">${n.status}</span>${n.alasan_batal ? `<br><span class="err" style="font-size:.8em">${esc(n.alasan_batal)}</span>` : ''}</td>
       <td>${n.status === 'Terbit' ? `${n.perihal.startsWith('(nomor dicadangkan') ? `<button class="btn small primary" data-perihal="${n.id}">Isi perihal</button> ` : ''}<button class="btn small danger" data-batal="${n.id}">Batalkan</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">Belum ada nomor surat umum pada tahun ini. Nomor Surat Tugas ada di menu Surat Tugas &amp; SPD.</td></tr>'}</tbody></table></div>
    <h3 style="margin-top:22px">Kode penomoran</h3>
@@ -1102,7 +1111,7 @@ async function viewSurat(m) {
        <td><button class="btn small primary" data-terbit="${j.id}">Terbitkan ST</button></td></tr>`).join('')}</tbody></table></div>`
       : '<div class="card"><p>Tidak ada jadwal Disetujui yang menunggu Surat Tugas.</p><p class="muted">Jadwal harus berstatus <b>Disetujui</b> (oleh Kepala) dan Anda harus berwenang atas sumber dananya. Pengelola Program tidak menerbitkan ST.</p></div>')
     : `<div class="tbl-wrap"><table><thead><tr><th>Nomor</th><th>Tanggal</th><th>Kegiatan / tujuan</th><th>Petugas</th><th>Realisasi belanja</th><th>Status</th><th></th></tr></thead><tbody>
-      ${daftar.map(x => `<tr class="${x.status === 'Dibatalkan' ? 'batal' : ''}"><td style="white-space:nowrap"><b>${esc(x.nomor)}</b><br>${x.nomor_srikandi ? `<span class="okc">Srikandi: ${esc(x.nomor_srikandi)}</span>` : '<span class="muted">belum ada nomor Srikandi</span>'}</td>
+      ${daftar.map(x => `<tr class="${x.status === 'Dibatalkan' ? 'batal' : ''}"><td style="white-space:nowrap"><b>${esc(x.nomor)}</b> ${cp(x.nomor)}<br>${x.nomor_srikandi ? `<span class="okc">Srikandi: ${esc(x.nomor_srikandi)}</span> ${cp(x.nomor_srikandi)}` : '<span class="muted">belum ada nomor Srikandi</span>'}</td>
         <td style="white-space:nowrap">${tglID(x.mulai)}${x.selesai !== x.mulai ? '<br>s.d. ' + tglID(x.selesai) : ''}</td><td>${esc(x.maksud)}<br><span class="muted">${esc(x.lokasi)} · ${esc(x.dana)}</span></td>
         <td>${x.spd.length} orang</td><td style="white-space:nowrap">${x.status === 'Dibatalkan' ? '-' : x.penuh ? `${rp(x.realisasi.dibayar)}<br><span class="muted">${x.realisasi.lunas}/${x.realisasi.petugas} SPJ dibayar</span>` : x.spd.map(p => `<span class="badge ${SP_BADGE[p.spj_status] || ''}">${p.spj_status || '-'}</span>`).join(' ')}</td><td>${bdg(x)}${x.status === 'Terbit' ? `<br><span class="badge ${x.srikandi.selesai ? 'st-Terlaksana' : 'st-Diajukan'}" title="Diunggah ke Srikandi · nomor dicatat · PDF final">${x.srikandi.selesai ? 'Selesai di Srikandi' : 'Srikandi ' + [x.srikandi.diunggah, x.srikandi.nomor, x.srikandi.final].filter(Boolean).length + '/3'}</span>` : ''}${x.alasan_batal ? `<br><span class="err" style="font-size:.8em">${esc(x.alasan_batal)}</span>` : ''}</td><td><button class="btn small" data-buka="${x.id}">Dokumen</button></td></tr>`).join('') || '<tr><td colspan="7" class="muted">Belum ada Surat Tugas.</td></tr>'}</tbody></table></div>`}`;
   const reload = () => viewSurat(m);
@@ -1140,7 +1149,7 @@ async function viewSurat(m) {
   function buka(id) {
     const x = daftar.find(r => r.id === id), aktif = x.status === 'Terbit';
     const L = (dok, label, cls = '') => `<span class="fmt"><b>${label}</b> <button type="button" class="btn small" data-d="${dok}">PDF</button>${x.penuh || !['st', 'spd', 'paket'].includes(dok) ? ` <button type="button" class="btn small" data-d="${dok}" data-f="docx">DOCX</button>` : ''}</span> `;
-    dialog(`ST ${x.nomor}`, `<div class="kvl"><b>Status</b><span>${bdg(x)}</span><b>Nomor Srikandi</b><span>${x.nomor_srikandi ? esc(x.nomor_srikandi) : '<span class="muted">belum dicatat</span>'}</span>
+    dialog(`ST ${x.nomor}`, `<div class="kvl"><b>Status</b><span>${bdg(x)}</span><b>Nomor</b><span>${esc(x.nomor)} ${cp(x.nomor)}</span><b>Nomor Srikandi</b><span>${x.nomor_srikandi ? esc(x.nomor_srikandi) + ' ' + cp(x.nomor_srikandi) : '<span class="muted">belum dicatat</span>'}</span>
       <b>Kegiatan</b><span>${esc(x.maksud)}</span><b>Tempat/Waktu</b><span>${esc(x.lokasi)}, ${tglID(x.mulai)}${x.selesai !== x.mulai ? ' s.d. ' + tglID(x.selesai) : ''}</span>
       <b>Petugas</b><span>${x.spd.map(p => `${esc(nm(p.nama))}${x.penuh ? ` <span class="muted">(${rp(p.total)})</span>` : ''}`).join('<br>')}</span>
       ${aktif ? `<b>Realisasi belanja</b><span>${x.spd.map(p => `${esc(nm(p.nama))}: <span class="badge ${SP_BADGE[p.spj_status] || ''}">${p.spj_status || 'belum ada SPJ'}</span>${p.spj_total != null && x.penuh ? ' ' + rp(p.spj_total) : ''}${p.spj_bukti ? ` <span class="muted">${esc(p.spj_bukti)}</span>` : ''} ${p.spj_id ? `<button type="button" class="btn small" data-spj="${p.spj_id}">Buka SPJ</button>` : ''}`).join('<br>')}</span>` : ''}
