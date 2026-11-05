@@ -118,13 +118,72 @@ BEGIN SELECT RAISE(ABORT, 'LIBUR'); END;
 CREATE TRIGGER IF NOT EXISTS trg_penugasan_cuti BEFORE INSERT ON penugasan_hari
 WHEN EXISTS(SELECT 1 FROM cuti WHERE pegawai_id = NEW.pegawai_id AND NEW.tanggal BETWEEN mulai AND selesai)
 BEGIN SELECT RAISE(ABORT, 'CUTI'); END;
+
+-- Tahap 4: Surat Tugas (ST) & Surat Perjalanan Dinas (SPD). Setelah terbit, isi ST/SPD TERKUNCI (trigger);
+-- perubahan hanya lewat pembatalan + terbit ulang dengan nomor baru. Nomor tidak pernah dipakai ulang.
+CREATE TABLE IF NOT EXISTS surat_tugas(
+  id INTEGER PRIMARY KEY, jadwal_id INTEGER NOT NULL REFERENCES jadwal(id), sumber_dana_id INTEGER NOT NULL REFERENCES sumber_dana(id),
+  tahun INTEGER NOT NULL, jenis_nomor TEXT NOT NULL DEFAULT 'ST-BOK', nomor_urut INTEGER NOT NULL, nomor TEXT NOT NULL, tanggal_surat TEXT NOT NULL,
+  dasar TEXT, maksud TEXT NOT NULL, penandatangan_id INTEGER REFERENCES pejabat(id), isi_json TEXT NOT NULL, nomor_srikandi TEXT,
+  status TEXT NOT NULL DEFAULT 'Terbit' CHECK(status IN ('Terbit','Dibatalkan')),
+  versi INTEGER NOT NULL DEFAULT 1, pengganti_dari INTEGER REFERENCES surat_tugas(id), alasan_batal TEXT,
+  dibuat_oleh TEXT, dibuat_pada TEXT DEFAULT (datetime('now','localtime')), dibatalkan_oleh TEXT, dibatalkan_pada TEXT,
+  UNIQUE(tahun, jenis_nomor, nomor_urut), UNIQUE(nomor));
+CREATE UNIQUE INDEX IF NOT EXISTS ux_st_aktif ON surat_tugas(jadwal_id) WHERE status='Terbit';
+-- Kode penomoran naskah (klasifikasi arsip Permendagri 83/2022; tata naskah Permendagri 1/2023). Seri nomor terpisah per jenis.
+CREATE TABLE IF NOT EXISTS jenis_nomor(
+  kode TEXT PRIMARY KEY, nama TEXT NOT NULL, klasifikasi TEXT NOT NULL, unit TEXT NOT NULL,
+  format TEXT NOT NULL DEFAULT '{klasifikasi}/{yymm}-{urut}/{unit}/{bulan_romawi}/{tahun}', keterangan TEXT, aktif INTEGER NOT NULL DEFAULT 1);
+-- Register nomor surat umum / lainnya (selain Surat Tugas yang nomornya otomatis dari ST)
+CREATE TABLE IF NOT EXISTS nomor_surat(
+  id INTEGER PRIMARY KEY, jenis TEXT NOT NULL REFERENCES jenis_nomor(kode), tahun INTEGER NOT NULL, nomor_urut INTEGER NOT NULL,
+  nomor TEXT NOT NULL UNIQUE, klasifikasi TEXT NOT NULL, tanggal TEXT NOT NULL, perihal TEXT NOT NULL, tujuan TEXT,
+  status TEXT NOT NULL DEFAULT 'Terbit' CHECK(status IN ('Terbit','Dibatalkan')), alasan_batal TEXT,
+  dibuat_oleh TEXT, dibuat_pada TEXT DEFAULT (datetime('now','localtime')), UNIQUE(jenis, tahun, nomor_urut));
+-- Satu dokumen SPD per ST (nomor sama dengan ST). Baris tabel ini = rincian biaya per petugas (tarif Perbup, terkunci).
+CREATE TABLE IF NOT EXISTS spd(
+  id INTEGER PRIMARY KEY, st_id INTEGER NOT NULL REFERENCES surat_tugas(id), pegawai_id INTEGER NOT NULL REFERENCES pegawai(id),
+  biaya_json TEXT NOT NULL, total INTEGER NOT NULL DEFAULT 0, UNIQUE(st_id, pegawai_id));
+CREATE TRIGGER IF NOT EXISTS trg_st_kunci BEFORE UPDATE ON surat_tugas
+WHEN OLD.status='Terbit' AND (NEW.nomor IS NOT OLD.nomor OR NEW.nomor_urut IS NOT OLD.nomor_urut OR NEW.isi_json IS NOT OLD.isi_json OR NEW.maksud IS NOT OLD.maksud
+  OR NEW.dasar IS NOT OLD.dasar OR NEW.tanggal_surat IS NOT OLD.tanggal_surat OR NEW.jadwal_id IS NOT OLD.jadwal_id OR NEW.tahun IS NOT OLD.tahun)
+BEGIN SELECT RAISE(ABORT, 'ST_TERKUNCI'); END;
+-- nomor Srikandi diisi sekali (setelah ST ditandatangani elektronik), lalu terkunci
+CREATE TRIGGER IF NOT EXISTS trg_st_noskd BEFORE UPDATE ON surat_tugas
+WHEN OLD.nomor_srikandi IS NOT NULL AND NEW.nomor_srikandi IS NOT OLD.nomor_srikandi
+BEGIN SELECT RAISE(ABORT, 'NOMOR_SRIKANDI_TERKUNCI'); END;
+CREATE TRIGGER IF NOT EXISTS trg_st_final BEFORE UPDATE ON surat_tugas WHEN OLD.status='Dibatalkan'
+BEGIN SELECT RAISE(ABORT, 'ST_DIBATALKAN'); END;
+CREATE TRIGGER IF NOT EXISTS trg_st_nodel BEFORE DELETE ON surat_tugas BEGIN SELECT RAISE(ABORT, 'ST_TIDAK_BOLEH_DIHAPUS'); END;
+CREATE TRIGGER IF NOT EXISTS trg_spd_kunci BEFORE UPDATE ON spd BEGIN SELECT RAISE(ABORT, 'SPD_TERKUNCI'); END;
+CREATE TRIGGER IF NOT EXISTS trg_spd_nodel BEFORE DELETE ON spd BEGIN SELECT RAISE(ABORT, 'SPD_TIDAK_BOLEH_DIHAPUS'); END;
 """
 
+
+JENIS_NOMOR_AWAL = [
+    ("ST-BOK", "Surat Tugas & SPD — BOK", "000.1.2.3", "PKM.MELATI.BOK", "000.1.2.3 = Perjalanan Dinas Pegawai (Permendagri 83/2022). Seri nomor khusus BOK."),
+    ("ST-DAU", "Surat Tugas & SPD — DAU", "000.1.2.3", "PKM.MELATI.DAU", "Seri nomor khusus DAU."),
+    ("ST-BLUD", "Surat Tugas & SPD — BLUD", "000.1.2.3", "PKM.MELATI.BLUD", "Seri nomor khusus BLUD (hanya Kepala & Bendahara BLUD)."),
+    ("UMUM", "Surat Umum", "000", "PKM.MELATI", "000 = Umum. Klasifikasi rinci dapat diubah saat menerbitkan nomor."),
+]
 
 # Pengaturan yang ditambahkan setelah rilis awal (ditambahkan otomatis ke database lama)
 PENGATURAN_BARU = [
     ("batas_persen_ruangan", "50", "Maks. % pegawai satu ruangan yang boleh meninggalkan ruangan (dinas luar/cuti) pada hari yang sama"),
     ("ruangan_hitung_cuti", "1", "1 = pegawai cuti dihitung sebagai tidak berada di ruangan; 0 = hanya dinas luar yang dihitung"),
+    ("format_nomor_spd", "{no}/SPD/PKM-MLT/{bulan_romawi}/{tahun}", "Format nomor Surat Perjalanan Dinas"),
+    ("kota_surat", "Kuala Kapuas", "Kota pada penandatanganan surat"),
+    ("tempat_berangkat", "UPT Puskesmas Melati", "Tempat berangkat pada SPD"),
+    ("kop_jalan", "Melati No 18 Kecamatan Selat,", "Kop (template Srikandi): isian setelah 'Jalan'"),
+    ("kop_kodepos", "73514", "Kop (template Srikandi): kode pos"),
+    ("kop_laman", "pkmmelati.com", "Kop (template Srikandi): laman"),
+    ("kop_email", "puskesmasmelati2016@gmail.com", "Kop (template Srikandi): pos-el"),
+    ("dasar_st_default", "Peraturan Bupati Kapuas Nomor 8 Tahun 2026 Tanggal 30 April 2026 Tentang Perjalanan Dinas", "Dasar pada Surat Tugas"),
+    ("nomor_dpa", "DPA/A.1/1.02.0.00.0.00.02.0000/001/2026", "Nomor DPA untuk 'Pembebanan Biaya' pada Surat Tugas"),
+    ("anggaran_instansi", "1.02.0.00.0.00.02.0003|Puskesmas Melati", "SPD: kode|nama instansi"),
+    ("anggaran_program", "1.02.02|Pemenuhan Upaya Kesehatan Perorangan dan Upaya Kesehatan Masyarakat\n1.02.02.2.02|Penyediaan Layanan Kesehatan Untuk UKM dan UKP Rujukan Tingkat Daerah Kabupaten/Kota", "SPD: program (satu baris 'kode|nama' per baris)"),
+    ("anggaran_kegiatan", "1.02.02.2.02.0033|Operasional Pelayanan Puskesmas", "SPD: kode|nama kegiatan"),
+    ("anggaran_rekening", "5.1.02.04.01.0001|Belanja Perjalanan Dinas Biasa", "SPD: kode|nama rekening belanja"),
 ]
 
 
@@ -210,6 +269,25 @@ def init_db() -> None:
     if "sumber" not in {r["name"] for r in con.execute("PRAGMA table_info(audit_log)").fetchall()}:
         con.execute("ALTER TABLE audit_log ADD COLUMN sumber TEXT")
         con.execute("UPDATE audit_log SET sumber='BLUD' WHERE tabel IN ('bok_menu','bok_rincian','bok_baris','bok_pagu','rencana','jadwal') AND (data_lama LIKE '%BLUD%' OR data_baru LIKE '%BLUD%')")
+    # Migrasi: seri nomor ST per jenis (tabel surat_tugas dibuat ulang bila masih kosong)
+    st_sql = (con.execute("SELECT sql FROM sqlite_master WHERE name='surat_tugas'").fetchone() or {}).get("sql") or ""
+    if st_sql and "jenis_nomor" not in st_sql:
+        if con.execute("SELECT COUNT(*) c FROM surat_tugas").fetchone()["c"] == 0:
+            con.executescript("DROP TRIGGER IF EXISTS trg_spd_kunci; DROP TRIGGER IF EXISTS trg_spd_nodel; DROP TABLE IF EXISTS spd; "
+                              "DROP TRIGGER IF EXISTS trg_st_kunci; DROP TRIGGER IF EXISTS trg_st_noskd; DROP TRIGGER IF EXISTS trg_st_final; DROP TRIGGER IF EXISTS trg_st_nodel; DROP TABLE surat_tugas;")
+            con.executescript(SCHEMA)
+        else:
+            raise RuntimeError("Tabel surat_tugas berisi data dengan skema lama; migrasi manual diperlukan.")
+    for kode, nama, klas, unit, ket in JENIS_NOMOR_AWAL:
+        con.execute("INSERT OR IGNORE INTO jenis_nomor(kode,nama,klasifikasi,unit,keterangan) VALUES(?,?,?,?,?)", (kode, nama, klas, unit, ket))
+    # Migrasi Tahap 4 (spd versi awal per-petugas bernomor sendiri, belum berisi data): buat ulang bila masih kosong
+    spd_sql = (con.execute("SELECT sql FROM sqlite_master WHERE name='spd'").fetchone() or {}).get("sql") or ""
+    if "nomor_urut" in spd_sql and con.execute("SELECT COUNT(*) c FROM spd").fetchone()["c"] == 0:
+        con.executescript("DROP TRIGGER IF EXISTS trg_spd_kunci; DROP TRIGGER IF EXISTS trg_spd_nodel; DROP TABLE spd;")
+        con.executescript(SCHEMA)
+    if "nomor_srikandi" not in {r["name"] for r in con.execute("PRAGMA table_info(surat_tugas)").fetchall()}:
+        con.execute("ALTER TABLE surat_tugas ADD COLUMN nomor_srikandi TEXT")
+        con.executescript(SCHEMA)
     # Migrasi database lama: kolom baru pada tabel pegawai
     ada = {r["name"] for r in con.execute("PRAGMA table_info(pegawai)").fetchall()}
     for kol in ("ruangan", "telepon"):

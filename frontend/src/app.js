@@ -52,7 +52,7 @@ function dialog(judul, bodyHtml, onSave, saveLabel = 'Simpan') {
 // ---------- navigasi ----------
 const MENU = [
   ['Anggaran', [['bok', 'Pagu Anggaran BOK'], ['dau', 'Pagu Anggaran DAU'], ['blud', 'Pagu Anggaran BLUD'], ['rencana', 'Perencanaan (RPK/POA)']]],
-  ['Dinas Luar', [['jadwal', 'Jadwal Dinas Luar']]],
+  ['Dinas Luar', [['jadwal', 'Jadwal Dinas Luar'], ['st', 'Surat Tugas & SPD'], ['nomor', 'Penomoran Surat']]],
   ['Master Data', [['pegawai', 'Pegawai'], ['sumber_dana', 'Sumber Dana'], ['lokasi', 'Lokasi Tujuan'], ['tarif', 'Tarif Perbup'], ['pejabat', 'Pejabat'], ['libur', 'Hari Libur'], ['cuti', 'Cuti Pegawai'], ['pengaturan', 'Pengaturan & Kop']]],
   ['Alat', [['kalkulator', 'Kalkulator Biaya'], ['riwayat', 'Riwayat Perubahan'], ['data', 'Backup & Ekspor']]],
   ['Sistem', [['users', 'Pengguna']]],
@@ -60,20 +60,22 @@ const MENU = [
 function buildNav() {
   let h = '';
   for (const [g, items] of MENU) {
-    const vis = items.filter(([k]) => S.meta[k] || (['kalkulator', 'data', 'rencana', 'jadwal'].includes(k) && S.bisaBaca) || (['bok', 'dau', 'blud'].includes(k) && S.akses[k.toUpperCase()].baca) || (k === 'riwayat' && (S.bisaTulis || S.user.role === 'bendahara_blud')));
+    const vis = items.filter(([k]) => S.meta[k] || (['kalkulator', 'data', 'rencana', 'jadwal', 'nomor'].includes(k) && S.bisaBaca) || k === 'st' || (['bok', 'dau', 'blud'].includes(k) && S.akses[k.toUpperCase()].baca) || (k === 'riwayat' && (S.bisaTulis || S.user.role === 'bendahara_blud')));
     if (!vis.length) continue;
     h += `<h4>${g}</h4>` + vis.map(([k, l]) => `<a data-k="${k}">${l}</a>`).join('');
   }
-  if (!S.bisaBaca) h = '<h4>Akses terbatas</h4><a class="on">Beranda</a>';
+  if (!S.bisaBaca) h = '<h4>Dinas Luar</h4><a data-k="st">Surat Tugas &amp; SPD Saya</a>';
   $('#nav').innerHTML = h;
   $('#nav').onclick = e => { const k = e.target.dataset.k; if (k) { location.hash = k; $('#nav').classList.remove('open'); } };
 }
 async function route() {
-  const k = location.hash.slice(1) || (S.bisaBaca ? 'bok' : '');
+  const k = location.hash.slice(1) || (S.bisaBaca ? 'bok' : 'st');
   document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('on', a.dataset.k === k));
   const m = $('#main');
   try {
-    if (!S.bisaBaca) m.innerHTML = `<div class="card"><h2>Selamat datang, ${esc(S.user.nama)}</h2><p class="muted">Jadwal, Surat Tugas, dan rincian uang Anda akan tampil di sini pada tahap berikutnya.</p></div>`;
+    if (k === 'st') await viewSurat(m);
+    else if (k === 'nomor' && S.bisaBaca) await viewNomor(m);
+    else if (!S.bisaBaca) m.innerHTML = `<div class="card"><h2>Selamat datang, ${esc(S.user.nama)}</h2><p class="muted">Jadwal, Surat Tugas, dan rincian uang Anda akan tampil di sini pada tahap berikutnya.</p></div>`;
     else if (['bok', 'dau', 'blud'].includes(k)) await viewBok(m, k.toUpperCase());
     else if (k === 'rencana') await viewRencana(m);
     else if (k === 'jadwal') await viewJadwal(m);
@@ -591,6 +593,112 @@ async function viewJadwal(m) {
       } catch (x) { toast(x.message, 1); }
     };
   }
+}
+
+// ---------- Penomoran Surat ----------
+S.nmJenis = '';
+async function viewNomor(m) {
+  const T = S.bokTahun, kepala = S.user.role === 'kepala';
+  const [jenis, daftar] = await Promise.all([api('/api/nomor/jenis'), api(`/api/nomor?tahun=${T}` + (S.nmJenis ? `&jenis=${S.nmJenis}` : ''))]);
+  const umum = jenis.filter(j => !j.kode.startsWith('ST-') && j.aktif);
+  m.innerHTML = `<h2>Penomoran Surat</h2>
+   <p class="muted">Pola nomor mengikuti contoh Srikandi: <code>klasifikasi/yymm-urut/unit/bulan-romawi/tahun</code>. Klasifikasi arsip menurut Permendagri 83/2022 (<b>000.1.2.3</b> = Perjalanan Dinas Pegawai; <b>000</b> = Umum); tata naskah menurut Permendagri 1/2023.
+   Seri nomor <b>terpisah</b> untuk BOK, DAU, BLUD, dan Surat Umum; nomor tidak pernah dipakai ulang. Nomor resmi Surat Tugas tetap diberikan Srikandi saat TTE.</p>
+   <div class="bar"><label style="display:flex;gap:6px;align-items:center">Tahun <input id="nTh" type="number" value="${T}" style="width:90px"></label>
+    <select id="nJn"><option value="">Semua jenis</option>${jenis.map(j => `<option value="${j.kode}" ${S.nmJenis === j.kode ? 'selected' : ''}>${esc(j.nama)}</option>`).join('')}</select><span style="flex:1"></span>
+    <button class="btn primary" id="nBaru">+ Terbitkan nomor surat</button></div>
+   <div class="tbl-wrap"><table><thead><tr><th>Nomor</th><th>Tanggal</th><th>Perihal / tujuan</th><th>Status</th><th></th></tr></thead><tbody>
+    ${daftar.map(n => `<tr class="${n.status === 'Dibatalkan' ? 'batal' : ''}"><td style="white-space:nowrap"><b>${esc(n.nomor)}</b></td><td>${tglID(n.tanggal)}</td><td>${esc(n.perihal)}${n.tujuan ? `<br><span class="muted">kepada ${esc(n.tujuan)}</span>` : ''}</td>
+      <td><span class="badge ${n.status === 'Terbit' ? 'st-Disetujui' : 'st-Dibatalkan'}">${n.status}</span>${n.alasan_batal ? `<br><span class="err" style="font-size:.8em">${esc(n.alasan_batal)}</span>` : ''}</td>
+      <td>${n.status === 'Terbit' ? `<button class="btn small danger" data-batal="${n.id}">Batalkan</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">Belum ada nomor surat umum pada tahun ini. Nomor Surat Tugas ada di menu Surat Tugas &amp; SPD.</td></tr>'}</tbody></table></div>
+   <h3 style="margin-top:22px">Kode penomoran</h3>
+   <div class="tbl-wrap"><table><thead><tr><th>Jenis</th><th>Klasifikasi</th><th>Kode unit</th><th>Contoh nomor berikutnya</th>${kepala ? '<th></th>' : ''}</tr></thead><tbody id="nKode"></tbody></table></div>
+   <p class="muted" style="font-size:.85em">Kode unit membedakan seri BOK / DAU / BLUD / Umum. Hanya Kepala Puskesmas yang dapat mengubah kode; perubahan berlaku untuk nomor berikutnya.</p>`;
+  const hari = new Date().toISOString().slice(0, 10);
+  const contoh = await Promise.all(jenis.map(j => api(`/api/nomor/pratinjau?jenis=${j.kode}&tanggal=${hari}`).then(r => r.nomor).catch(() => '–')));
+  $('#nKode').innerHTML = jenis.map((j, i) => `<tr><td><b>${esc(j.nama)}</b><br><span class="muted" style="font-size:.82em">${esc(j.keterangan || '')}</span></td><td>${esc(j.klasifikasi)}</td><td>${esc(j.unit)}</td><td><code>${esc(contoh[i])}</code></td>
+    ${kepala ? `<td><button class="btn small" data-kode="${j.kode}">Ubah</button></td>` : ''}</tr>`).join('');
+  const reload = () => viewNomor(m);
+  $('#nTh').onchange = e => { S.bokTahun = Number(e.target.value) || T; reload(); };
+  $('#nJn').onchange = e => { S.nmJenis = e.target.value; reload(); };
+  $('#nBaru').onclick = () => {
+    dialog('Terbitkan nomor surat', `<label>Jenis<select name="jenis">${umum.map(j => `<option value="${j.kode}">${esc(j.nama)}</option>`).join('')}</select></label>
+      <div class="grid2"><label>Tanggal surat<input name="tanggal" type="date" value="${hari}" required></label><label>Klasifikasi (boleh dirinci)<input name="klasifikasi" placeholder="${esc(umum[0]?.klasifikasi || '000')}"></label></div>
+      <label>Perihal<input name="perihal" required></label><label>Tujuan / kepada (opsional)<input name="tujuan"></label>
+      <div class="card" style="padding:10px">Nomor berikutnya: <b id="nPrev">…</b></div>`,
+      async d => { const r = await api('/api/nomor', { method: 'POST', body: d }); toast('Nomor terbit: ' + r.nomor); await reload(); });
+    const f = $('#dlgForm'); let tm;
+    const seg = async () => { const q = new URLSearchParams({ jenis: f.elements.jenis.value, tanggal: f.elements.tanggal.value || hari }); if (f.elements.klasifikasi.value) q.set('klasifikasi', f.elements.klasifikasi.value); try { $('#nPrev').textContent = (await api('/api/nomor/pratinjau?' + q)).nomor; } catch (x) { $('#nPrev').textContent = x.message; } };
+    f.addEventListener('input', () => { clearTimeout(tm); tm = setTimeout(seg, 250); }); f.addEventListener('change', seg); seg();
+  };
+  m.onclick = e => {
+    const b = e.target.closest('[data-batal]'), k = e.target.closest('[data-kode]');
+    if (b) dialog('Batalkan nomor?', '<p>Nomor yang dibatalkan <b>tidak dipakai ulang</b>.</p><label>Alasan<input name="alasan" required minlength="5"></label>', async d => { await api(`/api/nomor/${b.dataset.batal}/batal`, { method: 'POST', body: d }); toast('Nomor dibatalkan.'); await reload(); }, 'Batalkan');
+    if (k) { const j = jenis.find(x => x.kode === k.dataset.kode); dialog('Kode penomoran — ' + j.nama, `<div class="grid2"><label>Klasifikasi arsip<input name="klasifikasi" value="${esc(j.klasifikasi)}" required></label><label>Kode unit<input name="unit" value="${esc(j.unit)}" required></label></div>
+      <label>Format<input name="format" value="${esc(j.format)}" required></label><p class="muted" style="font-size:.82em">Kode yang tersedia: {klasifikasi} {yymm} {urut} {unit} {bulan_romawi} {tahun}. Format wajib memuat {urut}.</p>`, async d => { await api('/api/nomor/jenis/' + j.kode, { method: 'PUT', body: d }); toast('Kode penomoran disimpan.'); await reload(); }); }
+  };
+}
+
+// ---------- Surat Tugas (ST) & SPD ----------
+S.stTab = 'terbit';
+async function viewSurat(m) {
+  const T = S.bokTahun, penuhRole = S.bisaBaca;
+  const [siap, daftar] = await Promise.all([penuhRole ? api(`/api/st/siap?tahun=${T}`) : Promise.resolve([]), api(`/api/st?tahun=${T}`)]);
+  const tab = S.stTab === 'siap' && penuhRole ? 'siap' : 'terbit';
+  const bdg = x => `<span class="badge ${x.status === 'Terbit' ? 'st-Disetujui' : 'st-Dibatalkan'}">${x.status}${x.versi > 1 ? ' v' + x.versi : ''}</span>`;
+  const nm = n => n.split(',')[0];
+  m.innerHTML = `<h2>Surat Tugas &amp; SPD</h2>
+   <p class="muted">${penuhRole ? 'ST dan SPD dibuat dari jadwal yang sudah disetujui. Ekspor <b>DOCX Srikandi</b> memakai templat resmi (kode tanda tangan elektronik dibiarkan untuk diisi Srikandi). Setelah terbit, isi ST <b>terkunci</b>; perubahan hanya lewat pembatalan + terbit ulang.' : 'Surat Tugas dan SPD Anda.'}</p>
+   <div class="bar"><label style="display:flex;gap:6px;align-items:center">Tahun <input id="sTh" type="number" value="${T}" style="width:90px"></label></div>
+   ${penuhRole ? `<div class="tabs"><button class="tab ${tab === 'terbit' ? 'on' : ''}" data-tab="terbit">ST terbit (${daftar.length})</button><button class="tab ${tab === 'siap' ? 'on' : ''}" data-tab="siap">Siap diterbitkan (${siap.length})</button></div>` : ''}
+   ${tab === 'siap' ? (siap.length ? `<div class="tbl-wrap"><table><thead><tr><th>Tanggal</th><th>Kegiatan</th><th>Lokasi</th><th>Petugas</th><th>Dana</th><th></th></tr></thead><tbody>
+      ${siap.map(j => `<tr><td style="white-space:nowrap">${tglID(j.mulai)}${j.selesai !== j.mulai ? '<br>s.d. ' + tglID(j.selesai) : ''}</td><td>${esc(j.kegiatan)}</td><td>${esc(j.lokasi)}</td><td>${j.petugas.map(x => esc(nm(x))).join(', ')}</td><td>${esc(j.dana)}</td>
+       <td><button class="btn small primary" data-terbit="${j.id}">Terbitkan ST</button></td></tr>`).join('')}</tbody></table></div>`
+      : '<div class="card"><p>Tidak ada jadwal Disetujui yang menunggu Surat Tugas.</p><p class="muted">Jadwal harus berstatus <b>Disetujui</b> (oleh Kepala) dan Anda harus berwenang atas sumber dananya. Pengelola Program tidak menerbitkan ST.</p></div>')
+    : `<div class="tbl-wrap"><table><thead><tr><th>Nomor</th><th>Tanggal</th><th>Kegiatan / tujuan</th><th>Petugas</th><th>Status</th><th></th></tr></thead><tbody>
+      ${daftar.map(x => `<tr class="${x.status === 'Dibatalkan' ? 'batal' : ''}"><td style="white-space:nowrap"><b>${esc(x.nomor)}</b><br>${x.nomor_srikandi ? `<span class="okc">Srikandi: ${esc(x.nomor_srikandi)}</span>` : '<span class="muted">belum ada nomor Srikandi</span>'}</td>
+        <td style="white-space:nowrap">${tglID(x.mulai)}${x.selesai !== x.mulai ? '<br>s.d. ' + tglID(x.selesai) : ''}</td><td>${esc(x.maksud)}<br><span class="muted">${esc(x.lokasi)} · ${esc(x.dana)}</span></td>
+        <td>${x.spd.length} orang</td><td>${bdg(x)}${x.alasan_batal ? `<br><span class="err" style="font-size:.8em">${esc(x.alasan_batal)}</span>` : ''}</td><td><button class="btn small" data-buka="${x.id}">Dokumen</button></td></tr>`).join('') || '<tr><td colspan="6" class="muted">Belum ada Surat Tugas.</td></tr>'}</tbody></table></div>`}`;
+  const reload = () => viewSurat(m);
+  $('#sTh').onchange = e => { S.bokTahun = Number(e.target.value) || T; reload(); };
+  m.querySelectorAll('[data-tab]').forEach(t => t.onclick = () => { S.stTab = t.dataset.tab; reload(); });
+
+  async function terbit(jid) {
+    const dr = await api('/api/st/draft/' + jid);
+    dialog('Terbitkan Surat Tugas', `
+      <div class="card" style="padding:10px"><b>${esc(dr.kegiatan)}</b><br><span class="muted">${esc(dr.lokasi)} · ${tglID(dr.mulai)}${dr.selesai !== dr.mulai ? ' s.d. ' + tglID(dr.selesai) : ''} · ${esc(dr.dana)}<br>Petugas: ${dr.petugas.map(x => esc(nm(x))).join(', ')}</span></div>
+      <p class="muted" style="margin:0">Nomor internal berikutnya: <b>${esc(dr.nomor_pratinjau)}</b>. Nomor naskah resmi (<code>\${nomor_naskah}</code>) diberikan Srikandi saat ditandatangani; catat setelahnya.</p>
+      <div class="grid2"><label>Tanggal surat<input name="tanggal_surat" type="date" value="${dr.tanggal_surat}" required></label>
+       <label>Penandatangan<select name="penandatangan_id">${dr.pejabat.map(p => `<option value="${p.id}">${esc(p.label)}</option>`).join('')}</select></label></div>
+      <label>Dasar (satu baris per dasar)<textarea name="dasar" rows="3">${esc(dr.dasar)}</textarea></label>
+      <label>Untuk — dalam rangka<textarea name="maksud" rows="3" required>${esc(dr.maksud)}</textarea></label>
+      <label>Nomor DPA<input name="dpa" value="${esc(dr.dpa)}"></label>
+      <p class="warn" style="margin:0">Setelah terbit, isi ST tidak dapat diubah (hanya dibatalkan, lalu diterbitkan ulang dengan nomor baru).</p>`,
+      async d => { const r = await api('/api/st/terbit', { method: 'POST', body: { ...d, jadwal_id: jid } }); toast(`ST terbit: ${r.nomor}`); S.stTab = 'terbit'; await reload(); }, 'Terbitkan');
+  }
+  const docUrl = (id, dok, mode) => `/api/st/${id}/dok?dok=${dok}${mode ? '&mode=' + mode : ''}`;
+  function buka(id) {
+    const x = daftar.find(r => r.id === id), aktif = x.status === 'Terbit';
+    const L = (dok, label, cls = '') => `<button type="button" class="btn small ${cls}" data-d="${dok}">${label}</button>`;
+    dialog(`ST ${x.nomor}`, `<div class="kvl"><b>Status</b><span>${bdg(x)}</span><b>Nomor Srikandi</b><span>${x.nomor_srikandi ? esc(x.nomor_srikandi) : '<span class="muted">belum dicatat</span>'}</span>
+      <b>Kegiatan</b><span>${esc(x.maksud)}</span><b>Tempat/Waktu</b><span>${esc(x.lokasi)}, ${tglID(x.mulai)}${x.selesai !== x.mulai ? ' s.d. ' + tglID(x.selesai) : ''}</span>
+      <b>Petugas</b><span>${x.spd.map(p => `${esc(nm(p.nama))}${x.penuh ? ` <span class="muted">(${rp(p.total)})</span>` : ''}`).join('<br>')}</span>
+      <b>Diterbitkan</b><span>${esc(x.dibuat_oleh)} · ${esc(x.dibuat_pada)}</span>${x.alasan_batal ? `<b>Dibatalkan</b><span class="err">${esc(x.alasan_batal)} (${esc(x.dibatalkan_oleh)})</span>` : ''}</div>
+      ${x.penuh ? `<h4 style="margin:12px 0 4px">Ekspor ke Srikandi</h4><div class="acts">${aktif ? L('srikandi', '⬇ DOCX Srikandi (ST + SPD)', 'primary') : '<span class="muted">ST dibatalkan — tidak dapat diekspor.</span>'}</div>
+        <p class="muted" style="font-size:.82em;margin:4px 0">Unggah berkas ini ke Srikandi; kode <code>\${nomor_naskah}</code>, <code>\${ttd_pengirim1/2}</code>, dst. diisi Srikandi saat TTE.</p>` : ''}
+      <h4 style="margin:12px 0 4px">Cetak / pratinjau (PDF)</h4><div class="acts">${L('st', 'Surat Tugas')}${L('spd', 'SPD')}${L('rincian', 'Rincian biaya')}${x.penuh ? L('paket', 'Paket ST+SPD+Rincian') : ''}</div>
+      ${x.penuh ? `<div class="acts" style="margin-top:6px">${L('kuitansi', 'Kuitansi')}${L('hadir', 'Daftar hadir')}${L('riil', 'Pengeluaran riil')}${L('batal', 'Pernyataan pembatalan')}${L('kembali', 'Pernyataan pengembalian biaya')}${L('lengkap', 'Semua dokumen')}</div>` : ''}
+      ${x.penuh && aktif ? `<div class="acts" style="margin-top:14px;border-top:1px solid var(--line);padding-top:10px">${x.nomor_srikandi ? '' : '<button type="button" class="btn small" data-aksi="nomor">Catat nomor Srikandi</button>'}${x.bisa_batal ? '<button type="button" class="btn small danger" data-aksi="batal">Batalkan ST</button>' : ''}</div>` : ''}`);
+    $('#dlgForm').onclick = e => {
+      const b = e.target.closest('[data-d],[data-aksi]'); if (!b) return;
+      if (b.dataset.d === 'srikandi') { download(docUrl(id, 'srikandi'), `ST_SPD_Srikandi_${x.nomor_urut}.docx`); return; }
+      if (b.dataset.d) { window.open(docUrl(id, b.dataset.d), '_blank'); return; }
+      $('#dlg').close();
+      if (b.dataset.aksi === 'nomor') dialog('Catat nomor Srikandi', `<p class="muted">Salin nomor naskah dari Srikandi setelah ST ditandatangani. Hanya dapat diisi sekali.</p><label>Nomor naskah<input name="nomor" placeholder="000.1.2.3/2611-1179/PKM.MELATI/XI/2026" required></label>`, async d => { await api(`/api/st/${id}/nomor-srikandi`, { method: 'PUT', body: d }); toast('Nomor Srikandi tersimpan.'); await reload(); });
+      if (b.dataset.aksi === 'batal') dialog('Batalkan Surat Tugas?', `<p>ST <b>${esc(x.nomor)}</b> akan dibatalkan. Tanggal petugas tetap terkunci pada jadwal sampai jadwal diubah/dibatalkan. Nomor tidak dipakai ulang; ST pengganti memakai nomor baru.</p><label>Alasan pembatalan<input name="alasan" required minlength="5"></label>`, async d => { await api(`/api/st/${id}/batal`, { method: 'POST', body: d }); toast('ST dibatalkan.'); await reload(); }, 'Batalkan ST');
+    };
+  }
+  m.onclick = e => { const t = e.target.closest('[data-terbit]'), b = e.target.closest('[data-buka]'); if (t) terbit(Number(t.dataset.terbit)).catch(x => toast(x.message, 1)); if (b) buka(Number(b.dataset.buka)); };
 }
 
 // ---------- kalkulator ----------

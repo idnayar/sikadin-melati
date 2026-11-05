@@ -38,7 +38,7 @@ Variabel lain: `SIKADIN_DB` (lokasi file database), `SIKADIN_DIST` (lokasi build
 - [x] 1. Master data & tarif Perbup
 - [x] 2. Pagu & RAB BOK 2027, Perencanaan BOK (RPK/POA)
 - [x] 3. Jadwal dinas luar + anti-doubling (kalender, bagi petugas otomatis, constraint DB)
-- [ ] 4. ST/SPD (format Srikandi)  - [ ] 5. Realisasi & SPJ (tanpa panjar — diputuskan pemilik)
+- [x] 4. ST/SPD (templat Srikandi) + penomoran  - [ ] 5. Realisasi & SPJ (tanpa panjar — diputuskan pemilik)
 - [ ] 6. Rekap & laporan  - [ ] 7. Dashboard  - [ ] DAU/BLUD
 
 ## Catatan teknis
@@ -65,6 +65,25 @@ Aturan anti-doubling berlaku **lintas sumber dana** (satu pegawai tidak bisa dit
 
 **Laporan keuangan tetap satu kesatuan** (semua sumber dana dalam satu laporan, ketujuh komponen PSAP 13). Siapa yang boleh melihat laporan
 gabungan yang memuat angka BLUD: **keputusan pemilik — hanya Kepala Puskesmas dan Bendahara BLUD**; peran lain tidak mengakses laporan gabungan (diterapkan di Tahap 6).
+
+## Surat Tugas & SPD (Tahap 4)
+Dibuat dari **jadwal yang sudah disetujui** (menu Surat Tugas & SPD). Satu ST + satu SPD per jadwal; tarif per petugas dari Perbup (terkunci).
+- **Ekspor Srikandi (.docx):** mengisi templat resmi *Surat Tugas dan SPD OPD (2 Tandatangan)* (`backend/app/assets/templat_st_spd_srikandi.docx`).
+  Hanya titik-titik isian yang diisi; kode Srikandi dibiarkan utuh agar diisi saat TTE:
+  `${nomor_naskah} ${tanggal_naskah} ${ttd_pengirim2} ${nama_pengirim2} ${pangkat_pengirim2} ${nip_pengirim2}` (Kepala) dan
+  `${ttd_pengirim1} ${nama_pengirim1} ${nip_pengirim1}` (PPTK).
+- **Satu halaman:** tanda tangan ST dan SPD tidak boleh pindah halaman. Ukuran font dipadatkan otomatis sesuai jumlah petugas; ST yang tak muat
+  satu halaman (≈ >9 petugas) ditolak agar dipecah. Berlaku untuk DOCX dan PDF pratinjau.
+- **Terkunci:** setelah terbit isi ST/SPD tidak bisa diubah (trigger database); perubahan hanya lewat **Batalkan** + terbit ulang (nomor baru, riwayat tersimpan).
+- Dokumen PDF lain: rincian biaya, kuitansi, daftar hadir, daftar pengeluaran riil, surat pernyataan pembatalan & pengembalian biaya.
+- Petugas melihat ST/SPD/rincian miliknya sendiri; dokumen BLUD mengikuti batas akses BLUD.
+
+## Penomoran surat
+Pola mengikuti contoh Srikandi: `klasifikasi/yymm-urut/unit/bulan-romawi/tahun`, mis. `000.1.2.3/2611-001/PKM.MELATI.BOK/XI/2026`.
+Klasifikasi arsip: Permendagri 83/2022 (000.1.2.3 = Perjalanan Dinas Pegawai; 000 = Umum); tata naskah: Permendagri 1/2023.
+**Seri terpisah** untuk `ST-BOK`, `ST-DAU`, `ST-BLUD`, dan `UMUM` (kode unit berbeda: `.BOK`, `.DAU`, `.BLUD`); nomor tak dipakai ulang.
+Kode dapat diubah Kepala di menu Penomoran Surat. Nomor resmi ST diberikan Srikandi; nomor SIKADIN adalah nomor registri/internal
+dan nomor Srikandi dicatat sekali setelah TTE.
 
 ## Catatan standar akuntansi (Tahap 6)
 Laporan keuangan harus mengikuti **PSAP Nomor 13 — Penyajian Laporan Keuangan Badan Layanan Umum**

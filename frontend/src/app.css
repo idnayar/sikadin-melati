@@ -152,3 +152,5 @@ p.okc{color:var(--ok);margin:2px 0}
 dialog:has(#gen),dialog:has(#gAll){width:min(900px,96vw)}
 #gen details{margin:10px 0}#gen summary{cursor:pointer;padding:6px 0}
 .bar-meter{height:8px;background:var(--line);border-radius:99px;overflow:hidden}.bar-meter i{display:block;height:100%;background:var(--primary)}.bar-meter i.bad{background:var(--err)}
+tr.batal td{opacity:.6}tr.batal td:first-child b{text-decoration:line-through}
+code{background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:0 4px;font-size:.85em}
