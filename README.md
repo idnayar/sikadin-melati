@@ -47,6 +47,25 @@ Variabel lain: `SIKADIN_DB` (lokasi file database), `SIKADIN_DIST` (lokasi build
   Constraint anti-doubling (tahap 3): `UNIQUE(pegawai_id, tanggal)` pada tabel rincian harian penugasan.
 - Kontrak API (`/api/...`) sama dengan versi Node sebelumnya, jadi UI tidak berubah.
 
+## Sumber dana & hak akses (BOK / DAU / BLUD)
+Pagu, RAB (menu → rincian → baris), perencanaan, dan jadwal disusun **per sumber dana**; menunya sama untuk BOK, DAU, dan BLUD.
+
+| Peran | BOK / DAU | BLUD |
+|---|---|---|
+| Kepala Puskesmas | semua | semua |
+| Bendahara (BOK/DAU) | pagu, RAB, rencana | **tidak ada akses** |
+| Bendahara BLUD | hanya lihat | pagu, RAB, rencana |
+| Pengelola Program | rencana & jadwal | **tidak ada akses** |
+| Pegawai | jadwal sendiri | jadwal sendiri |
+
+Pembatasan BLUD dijaga di server (bukan hanya menyembunyikan menu): pagu/RAB/rencana BLUD, riwayat perubahan BLUD, dan
+ekspor riwayat tidak terlihat oleh yang tak berwenang. Backup database hanya untuk Kepala. Pada **jadwal**, kegiatan BLUD tetap
+muncul di kalender sebagai "Kegiatan BLUD (terbatas)" (tanggal, lokasi, petugas terlihat agar tidak bentrok; isi/anggaran tersembunyi).
+Aturan anti-doubling berlaku **lintas sumber dana** (satu pegawai tidak bisa ditugaskan dua kali pada tanggal sama).
+
+**Laporan keuangan tetap satu kesatuan** (semua sumber dana dalam satu laporan, ketujuh komponen PSAP 13). Siapa yang boleh melihat laporan
+gabungan yang memuat angka BLUD perlu diputuskan di Tahap 6.
+
 ## Catatan standar akuntansi (Tahap 6)
 Laporan keuangan harus mengikuti **PSAP Nomor 13 — Penyajian Laporan Keuangan Badan Layanan Umum**
 (PMK 217/PMK.05/2015). Komponennya ada tujuh: Laporan Realisasi Anggaran, Laporan Perubahan Saldo Anggaran Lebih,

@@ -48,6 +48,38 @@ def auth(request: Request) -> dict:
     return {k: v for k, v in u.items() if k != "_exp"}
 
 
+def akses_sumber(u: dict, kode: str, aksi: str = "baca") -> bool:
+    """Izin per sumber dana. aksi: 'baca' (lihat pagu/RAB/rencana), 'pagu' (ubah pagu & RAB), 'rencana' (buat/ubah rencana).
+    BLUD: HANYA Kepala Puskesmas dan Bendahara BLUD. BOK/DAU: Kepala, Bendahara (pagu+rencana), Pengelola Program (rencana);
+    Bendahara BLUD hanya boleh melihat BOK/DAU."""
+    role, kode = u["role"], str(kode or "").upper()
+    if role == "kepala":
+        return True
+    if kode == "BLUD":
+        return role == "bendahara_blud"
+    if role == "bendahara":
+        return True
+    if role == "program":
+        return aksi in ("baca", "rencana")
+    if role == "bendahara_blud":
+        return aksi == "baca"
+    return False
+
+
+def cek_sumber(u: dict, kode: str, aksi: str = "baca") -> None:
+    if not akses_sumber(u, kode, aksi):
+        raise Gagal("Data sumber dana " + str(kode) + " hanya dapat diakses oleh Kepala Puskesmas" + (" dan Bendahara BLUD." if str(kode).upper() == "BLUD" else " dan bendahara yang berwenang."), 403)
+
+
+def sumber_boleh(u: dict, aksi: str = "baca") -> list[str]:
+    return [k for k in ("BOK", "DAU", "BLUD") if akses_sumber(u, k, aksi)]
+
+
+def kode_sd(db, sd_id) -> str:
+    r = db.execute("SELECT kode FROM sumber_dana WHERE id=?", (sd_id,)).fetchone()
+    return r["kode"] if r else ""
+
+
 def bisa_tulis(u: dict) -> bool:
     return u["role"] in ("kepala", "bendahara")
 
@@ -68,10 +100,11 @@ def perlu_tulis(user: dict = Depends(auth)) -> dict:
     return user
 
 
-def audit(db, user: dict, tabel: str, rid, aksi: str, lama=None, baru=None) -> None:
+def audit(db, user: dict, tabel: str, rid, aksi: str, lama=None, baru=None, sumber: str | None = None) -> None:
+    """Catat perubahan. `sumber` (BOK/DAU/BLUD) menandai catatan keuangan agar riwayat BLUD tidak terlihat pihak yang tak berwenang."""
     dump = lambda o: json.dumps(o, ensure_ascii=False, default=str) if o else None  # noqa: E731
-    db.execute("INSERT INTO audit_log(user_id,username,tabel,record_id,aksi,data_lama,data_baru) VALUES(?,?,?,?,?,?,?)",
-               (user["id"], user["username"], tabel, rid, aksi, dump(lama), dump(baru)))
+    db.execute("INSERT INTO audit_log(user_id,username,tabel,record_id,aksi,data_lama,data_baru,sumber) VALUES(?,?,?,?,?,?,?,?)",
+               (user["id"], user["username"], tabel, rid, aksi, dump(lama), dump(baru), (sumber or None)))
 
 
 def pesan_db(e: Exception) -> str:

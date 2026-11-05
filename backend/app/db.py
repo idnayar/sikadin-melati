@@ -12,12 +12,12 @@ DB_PATH = Path(os.environ.get("SIKADIN_DB") or Path(__file__).resolve().parents[
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users(
   id INTEGER PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL,
-  nama TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN ('kepala','bendahara','program','pegawai')),
+  nama TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN ('kepala','bendahara','bendahara_blud','program','pegawai')),
   pegawai_id INTEGER REFERENCES pegawai(id), aktif INTEGER NOT NULL DEFAULT 1);
 CREATE TABLE IF NOT EXISTS audit_log(
   id INTEGER PRIMARY KEY, waktu TEXT NOT NULL DEFAULT (datetime('now','localtime')),
   user_id INTEGER, username TEXT, tabel TEXT NOT NULL, record_id INTEGER, aksi TEXT NOT NULL,
-  data_lama TEXT, data_baru TEXT);
+  data_lama TEXT, data_baru TEXT, sumber TEXT);
 CREATE TABLE IF NOT EXISTS pegawai(
   id INTEGER PRIMARY KEY, nama TEXT NOT NULL, nip TEXT UNIQUE, pangkat TEXT, golongan TEXT,
   jabatan TEXT, eselon TEXT, status TEXT NOT NULL DEFAULT 'ASN' CHECK(status IN ('ASN','PPPK','Non ASN')),
@@ -49,11 +49,14 @@ CREATE TABLE IF NOT EXISTS pengaturan(
   id INTEGER PRIMARY KEY, kunci TEXT NOT NULL UNIQUE, nilai TEXT, keterangan TEXT);
 CREATE TABLE IF NOT EXISTS libur(
   id INTEGER PRIMARY KEY, tanggal TEXT NOT NULL UNIQUE, keterangan TEXT);
+-- Pagu & RAB per sumber dana (BOK/DAU/BLUD). Nama tabel 'bok_*' dipertahankan dari versi awal (hanya BOK).
 CREATE TABLE IF NOT EXISTS bok_pagu(
-  id INTEGER PRIMARY KEY, tahun INTEGER NOT NULL UNIQUE, jenis TEXT NOT NULL DEFAULT 'Pagu Indikatif',
-  pagu INTEGER NOT NULL DEFAULT 0 CHECK(pagu >= 0), keterangan TEXT);
+  id INTEGER PRIMARY KEY, tahun INTEGER NOT NULL, sumber_dana_id INTEGER NOT NULL REFERENCES sumber_dana(id),
+  jenis TEXT NOT NULL DEFAULT 'Pagu Indikatif', pagu INTEGER NOT NULL DEFAULT 0 CHECK(pagu >= 0), keterangan TEXT,
+  UNIQUE(tahun, sumber_dana_id));
 CREATE TABLE IF NOT EXISTS bok_menu(
-  id INTEGER PRIMARY KEY, tahun INTEGER NOT NULL, no TEXT, nama TEXT NOT NULL, urut INTEGER NOT NULL DEFAULT 0);
+  id INTEGER PRIMARY KEY, tahun INTEGER NOT NULL, sumber_dana_id INTEGER REFERENCES sumber_dana(id),
+  no TEXT, nama TEXT NOT NULL, urut INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS bok_rincian(
   id INTEGER PRIMARY KEY, menu_id INTEGER NOT NULL REFERENCES bok_menu(id) ON DELETE CASCADE,
   no TEXT, nama TEXT NOT NULL, urut INTEGER NOT NULL DEFAULT 0);
@@ -125,6 +128,16 @@ PENGATURAN_BARU = [
 ]
 
 
+SCHEMA_USERS = """CREATE TABLE users(
+  id INTEGER PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL,
+  nama TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN ('kepala','bendahara','bendahara_blud','program','pegawai')),
+  pegawai_id INTEGER REFERENCES pegawai(id), aktif INTEGER NOT NULL DEFAULT 1);"""
+SCHEMA_BOK_PAGU = """CREATE TABLE bok_pagu(
+  id INTEGER PRIMARY KEY, tahun INTEGER NOT NULL, sumber_dana_id INTEGER NOT NULL REFERENCES sumber_dana(id),
+  jenis TEXT NOT NULL DEFAULT 'Pagu Indikatif', pagu INTEGER NOT NULL DEFAULT 0 CHECK(pagu >= 0), keterangan TEXT,
+  UNIQUE(tahun, sumber_dana_id));"""
+
+
 def _dict_factory(cur, row):
     return {c[0]: row[i] for i, c in enumerate(cur.description)}
 
@@ -175,6 +188,28 @@ def hitung_tingkat(eselon, golongan, status) -> str:
 def init_db() -> None:
     con = connect()
     con.executescript(SCHEMA)
+    # Migrasi database lama: pagu & menu RAB kini per sumber dana (data lama = BOK)
+    bok = (con.execute("SELECT id FROM sumber_dana WHERE kode='BOK'").fetchone() or {}).get("id")
+    if "sumber_dana_id" not in {r["name"] for r in con.execute("PRAGMA table_info(bok_pagu)").fetchall()}:
+        con.executescript("ALTER TABLE bok_pagu RENAME TO bok_pagu_lama;" + SCHEMA_BOK_PAGU)
+        con.execute("INSERT INTO bok_pagu(id,tahun,sumber_dana_id,jenis,pagu,keterangan) SELECT id,tahun,?,jenis,pagu,keterangan FROM bok_pagu_lama", (bok or 2,))
+        con.execute("DROP TABLE bok_pagu_lama")
+    if "sumber_dana_id" not in {r["name"] for r in con.execute("PRAGMA table_info(bok_menu)").fetchall()}:
+        con.execute("ALTER TABLE bok_menu ADD COLUMN sumber_dana_id INTEGER REFERENCES sumber_dana(id)")
+    if bok:
+        con.execute("UPDATE bok_menu SET sumber_dana_id=? WHERE sumber_dana_id IS NULL", (bok,))
+    con.execute("CREATE INDEX IF NOT EXISTS ix_bok_menu_sumber ON bok_menu(tahun, sumber_dana_id)")
+    # Migrasi: peran 'bendahara_blud' (tabel users dibuat ulang karena CHECK tidak bisa diubah) & kolom audit_log.sumber
+    sql_users = (con.execute("SELECT sql FROM sqlite_master WHERE name='users'").fetchone() or {}).get("sql") or ""
+    if sql_users and "bendahara_blud" not in sql_users:
+        con.execute("PRAGMA foreign_keys=OFF")
+        con.executescript("ALTER TABLE users RENAME TO users_lama;" + SCHEMA_USERS)
+        con.execute("INSERT INTO users(id,username,password_hash,nama,role,pegawai_id,aktif) SELECT id,username,password_hash,nama,role,pegawai_id,aktif FROM users_lama")
+        con.execute("DROP TABLE users_lama")
+        con.execute("PRAGMA foreign_keys=ON")
+    if "sumber" not in {r["name"] for r in con.execute("PRAGMA table_info(audit_log)").fetchall()}:
+        con.execute("ALTER TABLE audit_log ADD COLUMN sumber TEXT")
+        con.execute("UPDATE audit_log SET sumber='BLUD' WHERE tabel IN ('bok_menu','bok_rincian','bok_baris','bok_pagu','rencana','jadwal') AND (data_lama LIKE '%BLUD%' OR data_baru LIKE '%BLUD%')")
     # Migrasi database lama: kolom baru pada tabel pegawai
     ada = {r["name"] for r in con.execute("PRAGMA table_info(pegawai)").fetchall()}
     for kol in ("ruangan", "telepon"):
@@ -280,5 +315,6 @@ def _seed(con: sqlite3.Connection) -> None:
     # Akun demo — GANTI setelah login pertama. Di produksi atur SIKADIN_ADMIN_PASSWORD sebelum jalan pertama.
     pw = os.environ.get("SIKADIN_ADMIN_PASSWORD") or "sikadin2026"
     for u, n, r, p in [("kepala", "dr. Rina Marlina", "kepala", 1), ("bendahara", "Dewi Lestari, A.Md.Gz", "bendahara", 5),
+                       ("bendahara_blud", "Bendahara BLUD (ganti nama)", "bendahara_blud", None),
                        ("program", "Agus Prasetyo, SKM", "program", 4), ("pegawai", "Budi Santoso, S.Kep", "pegawai", 2)]:
         con.execute("INSERT INTO users(username,password_hash,nama,role,pegawai_id) VALUES(?,?,?,?,?)", (u, hash_password(pw), n, r, p))

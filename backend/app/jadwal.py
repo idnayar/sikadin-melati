@@ -9,7 +9,7 @@ import sqlite3
 
 from fastapi import APIRouter, Body, Depends
 
-from .core import Gagal, audit, get_db, perlu_baca
+from .core import Gagal, akses_sumber, audit, cek_sumber, get_db, kode_sd, perlu_baca, sumber_boleh
 
 router = APIRouter(prefix="/api/jadwal")
 AKTIF = ("Diusulkan", "Disetujui", "Terlaksana")
@@ -41,7 +41,10 @@ def _setting(db, k, d):
 
 
 def _bisa_ubah(u, j) -> bool:
-    return u["role"] in ("kepala", "bendahara") or (u["role"] == "program" and j["dibuat_oleh"] == u["username"])
+    """j['dana'] = kode sumber dana (BLUD hanya Kepala & Bendahara BLUD)."""
+    if j.get("dana") and not akses_sumber(u, j["dana"], "rencana"):
+        return False
+    return u["role"] in ("kepala", "bendahara", "bendahara_blud") or (u["role"] == "program" and j["dibuat_oleh"] == u["username"])
 
 
 def _beban_bulan(db, pegawai_id, ym, excl=0) -> int:
@@ -127,7 +130,7 @@ def pilih_otomatis(db, hari, jumlah, jangan: set[int], excl=0, program=None) -> 
     return dipilih, sisa[:5]
 
 
-def periksa(db, b: dict, excl: int = 0) -> dict:
+def periksa(db, b: dict, excl: int = 0, user: dict | None = None) -> dict:
     """Validasi lengkap. Mengembalikan {ok, galat:[{jenis,pesan,pegawai_id,pengganti}], peringatan:[...], hari:[...]}."""
     galat, peringatan = [], []
 
@@ -138,6 +141,8 @@ def periksa(db, b: dict, excl: int = 0) -> dict:
     r = db.execute("SELECT * FROM rencana WHERE id=?", (rid,)).fetchone()
     if not r:
         raise Gagal("Pilih rencana kegiatan yang sudah disetujui.")
+    if user is not None:
+        cek_sumber(user, kode_sd(db, r["sumber_dana_id"]), "rencana")
     mulai, selesai = _tgl(b.get("mulai"), "Tanggal mulai"), _tgl(b.get("selesai"), "Tanggal selesai")
     if selesai < mulai:
         raise Gagal("Tanggal selesai tidak boleh sebelum tanggal mulai.")
@@ -275,7 +280,7 @@ def _sinkron_rencana(db, rid, user):
     baru = "Terjadwal" if n else "Disetujui"
     if r["status"] in ("Disetujui", "Terjadwal") and r["status"] != baru:
         db.execute("UPDATE rencana SET status=? WHERE id=?", (baru, rid))
-        audit(db, user, "rencana", rid, "STATUS", {"status": r["status"]}, {"status": baru, "alasan": "mengikuti jadwal"})
+        audit(db, user, "rencana", rid, "STATUS", {"status": r["status"]}, {"status": baru, "alasan": "mengikuti jadwal"}, kode_sd(db, r["sumber_dana_id"]))
 
 
 def _tambah_info(db, rows):
@@ -286,9 +291,11 @@ def _tambah_info(db, rows):
 
 @router.get("/rencana-siap")
 def rencana_siap(tahun: int, user=Depends(perlu_baca), db=Depends(get_db)):
-    rows = db.execute("""SELECT r.id, r.bulan, r.kegiatan, r.lokasi_id, l.nama lokasi, r.durasi, r.jumlah_petugas, r.jumlah_hari, r.frekuensi, r.status, r.sumber_dana_id,
+    boleh = sumber_boleh(user, "rencana")
+    rows = db.execute("""SELECT r.id, r.bulan, r.kegiatan, r.lokasi_id, l.nama lokasi, r.durasi, r.jumlah_petugas, r.jumlah_hari, r.frekuensi, r.status, r.sumber_dana_id, sd.kode dana,
         (SELECT COUNT(*) FROM jadwal j WHERE j.rencana_id=r.id AND j.status IN ('Diusulkan','Disetujui','Terlaksana')) terjadwal
-        FROM rencana r LEFT JOIN lokasi l ON l.id=r.lokasi_id WHERE r.tahun=? AND r.status IN ('Disetujui','Terjadwal') ORDER BY r.bulan, r.id""", (tahun,)).fetchall()
+        FROM rencana r LEFT JOIN lokasi l ON l.id=r.lokasi_id JOIN sumber_dana sd ON sd.id=r.sumber_dana_id
+        WHERE r.tahun=? AND r.status IN ('Disetujui','Terjadwal') AND sd.kode IN (%s) ORDER BY r.bulan, r.id""" % ",".join("?" * len(boleh)), (tahun, *boleh)).fetchall()
     return [x for x in rows if x["terjadwal"] < x["frekuensi"]]
 
 
@@ -317,13 +324,15 @@ def daftar(dari: str, sampai: str, pegawai_id: int | None = None, lokasi_id: int
         JOIN sumber_dana sd ON sd.id=j.sumber_dana_id JOIN rencana r ON r.id=j.rencana_id WHERE {' AND '.join(q)} ORDER BY j.mulai, j.id""", a).fetchall()
     for j in _tambah_info(db, rows):
         j["bisa_ubah"] = _bisa_ubah(user, j)
+        if not akses_sumber(user, j["dana"], "baca"):     # BLUD: petugas/tanggal/lokasi tetap tampil (agar tidak bentrok), isinya disembunyikan
+            j["kegiatan"], j["catatan"], j["alasan"] = f"Kegiatan {j['dana']} (terbatas)", None, None
     return rows
 
 
 @router.post("/periksa")
 def api_periksa(body: dict = Body(default={}), user=Depends(perlu_baca), db=Depends(get_db)):
     try:
-        return _bersih(periksa(db, body, int(body.get("id") or 0)))
+        return _bersih(periksa(db, body, int(body.get("id") or 0), user))
     except Gagal as e:
         return {"ok": False, "galat": [{"jenis": "isian", "pesan": e.pesan, "pegawai_id": None, "pengganti": []}], "peringatan": [], "hari": []}
 
@@ -345,7 +354,7 @@ def saran(body: dict = Body(default={}), user=Depends(perlu_baca), db=Depends(ge
 
 def buat_jadwal(db, user, body: dict, catatan_otomatis: str | None = None) -> dict:
     """Validasi lengkap lalu simpan sebagai jadwal 'Diusulkan'. Dipakai oleh input manual dan hasil generate otomatis."""
-    a = periksa(db, body)
+    a = periksa(db, body, 0, user)
     if not a["ok"]:
         raise Gagal(" ".join(g["pesan"] for g in a["galat"]), galat=[g["pesan"] for g in a["galat"]])
     r, lok = a["_r"], a["_lok"]
@@ -363,7 +372,7 @@ def buat_jadwal(db, user, body: dict, catatan_otomatis: str | None = None) -> di
         raise Gagal(_pesan_bentrok(e))
     _sinkron_rencana(db, r["id"], user)
     audit(db, user, "jadwal", jid, "TAMBAH", None, {"rencana_id": r["id"], "mulai": a["hari"][0], "selesai": a["hari"][-1], "lokasi_id": lok["id"], "petugas": a["_petugas"],
-                                                    **({"sumber": "generate otomatis"} if catatan_otomatis else {})})
+                                                    **({"sumber": "generate otomatis"} if catatan_otomatis else {})}, kode_sd(db, r["sumber_dana_id"]))
     return {"id": jid, "peringatan": a["peringatan"]}
 
 
@@ -386,7 +395,7 @@ def _hari_kerja(d: dt.date, hk: int) -> bool:
     return d.weekday() < hk
 
 
-def generate(db, tahun: int, bulan: int, rencana_ids=None, hari_kerja=5, hitung_cuti=True, ruangan=None) -> dict:
+def generate(db, tahun: int, bulan: int, rencana_ids=None, hari_kerja=5, hitung_cuti=True, ruangan=None, sumber_ok=None) -> dict:
     awal = dt.date(tahun, bulan, 1)
     akhir = (dt.date(tahun + (bulan == 12), bulan % 12 + 1, 1) - dt.timedelta(days=1))
     semua = _rentang(awal, akhir)
@@ -411,6 +420,8 @@ def generate(db, tahun: int, bulan: int, rencana_ids=None, hari_kerja=5, hitung_
     daftar = db.execute(q, (tahun, bulan)).fetchall()
     if rencana_ids:
         daftar = [r for r in daftar if r["id"] in set(rencana_ids)]
+    if sumber_ok is not None:   # hanya rencana dari sumber dana yang boleh diakses pengguna (BLUD: Kepala & Bendahara BLUD)
+        daftar = [r for r in daftar if kode_sd(db, r["sumber_dana_id"]) in sumber_ok]
     daftar.sort(key=lambda r: (-(r["jumlah_petugas"] * r["jumlah_hari"]), r["id"]))
 
     usulan, gagal = [], []
@@ -509,7 +520,7 @@ def api_generate(body: dict = Body(default={}), user=Depends(perlu_baca), db=Dep
     if not (tahun and 1 <= bulan <= 12):
         raise Gagal("Pilih bulan dan tahun.")
     return generate(db, tahun, bulan, [int(x) for x in body.get("rencana_ids") or []] or None, 6 if int(body.get("hari_kerja") or 5) == 6 else 5,
-                    None, body.get("ruangan") or None)
+                    None, body.get("ruangan") or None, sumber_boleh(user, "rencana"))
 
 
 @router.post("/generate/simpan")
@@ -542,11 +553,13 @@ def ubah(jid: int, body: dict = Body(default={}), user=Depends(perlu_baca), db=D
     j = db.execute("SELECT * FROM jadwal WHERE id=?", (jid,)).fetchone()
     if not j:
         raise Gagal("Jadwal tidak ditemukan.", 404)
-    if not _bisa_ubah(user, j):
+    kode = kode_sd(db, j["sumber_dana_id"])
+    cek_sumber(user, kode, "baca")
+    if not _bisa_ubah(user, {**j, "dana": kode}):
         raise Gagal("Anda tidak berhak mengubah jadwal ini.", 403)
     if j["status"] != "Diusulkan":
         raise Gagal("Hanya jadwal berstatus Diusulkan yang dapat diubah. Batalkan lalu buat ulang bila sudah disetujui.")
-    a = periksa(db, {**body, "rencana_id": j["rencana_id"]}, jid)
+    a = periksa(db, {**body, "rencana_id": j["rencana_id"]}, jid, user)
     if not a["ok"]:
         raise Gagal(" ".join(g["pesan"] for g in a["galat"]), galat=[g["pesan"] for g in a["galat"]])
     lok = a["_lok"]
@@ -557,7 +570,7 @@ def ubah(jid: int, body: dict = Body(default={}), user=Depends(perlu_baca), db=D
         _tulis_hari(db, jid, a)
     except sqlite3.IntegrityError as e:
         raise Gagal(_pesan_bentrok(e))
-    audit(db, user, "jadwal", jid, "UBAH", j, {"mulai": a["hari"][0], "selesai": a["hari"][-1], "lokasi_id": lok["id"], "petugas": a["_petugas"]})
+    audit(db, user, "jadwal", jid, "UBAH", j, {"mulai": a["hari"][0], "selesai": a["hari"][-1], "lokasi_id": lok["id"], "petugas": a["_petugas"]}, kode)
     return {"peringatan": a["peringatan"]}
 
 
@@ -566,6 +579,8 @@ def ubah_status(jid: int, body: dict = Body(default={}), user=Depends(perlu_baca
     j = db.execute("SELECT * FROM jadwal WHERE id=?", (jid,)).fetchone()
     if not j:
         raise Gagal("Jadwal tidak ditemukan.", 404)
+    kode = kode_sd(db, j["sumber_dana_id"])
+    cek_sumber(user, kode, "baca")
     ke, alasan = str(body.get("ke") or ""), str(body.get("alasan") or "").strip()
     ok = {("Diusulkan", "Disetujui"): "kepala", ("Diusulkan", "Ditolak"): "kepala", ("Diusulkan", "Dibatalkan"): "tulis",
           ("Disetujui", "Dibatalkan"): "kepala", ("Disetujui", "Diusulkan"): "kepala"}.get((j["status"], ke))
@@ -573,7 +588,7 @@ def ubah_status(jid: int, body: dict = Body(default={}), user=Depends(perlu_baca
         raise Gagal(f"Perubahan status {j['status']} → {ke} tidak diizinkan.")
     if ok == "kepala" and user["role"] != "kepala":
         raise Gagal("Hanya Kepala Puskesmas yang dapat melakukan ini.", 403)
-    if ok == "tulis" and not _bisa_ubah(user, j):
+    if ok == "tulis" and not _bisa_ubah(user, {**j, "dana": kode}):
         raise Gagal("Anda tidak berhak mengubah jadwal ini.", 403)
     if ke in ("Ditolak", "Dibatalkan") and not alasan:
         raise Gagal("Alasan wajib diisi.")
@@ -585,5 +600,5 @@ def ubah_status(jid: int, body: dict = Body(default={}), user=Depends(perlu_baca
         db.execute("DELETE FROM jadwal_hari WHERE jadwal_id=?", (jid,))
         db.execute("DELETE FROM penugasan_hari WHERE jadwal_id=?", (jid,))
     _sinkron_rencana(db, j["rencana_id"], user)
-    audit(db, user, "jadwal", jid, "STATUS", {"status": j["status"]}, {"status": ke, **({"alasan": alasan} if alasan else {})})
+    audit(db, user, "jadwal", jid, "STATUS", {"status": j["status"]}, {"status": ke, **({"alasan": alasan} if alasan else {})}, kode)
     return {"ok": 1}

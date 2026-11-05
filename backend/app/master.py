@@ -11,7 +11,7 @@ from openpyxl import Workbook, load_workbook
 from starlette.background import BackgroundTask
 
 from . import core
-from .core import Gagal, audit, auth, bisa_baca, bisa_tulis, get_db, pesan_db
+from .core import Gagal, akses_sumber, audit, auth, bisa_baca, bisa_tulis, get_db, pesan_db
 from .db import DB_PATH, hash_password, hitung_tingkat, verify_password
 
 router = APIRouter(prefix="/api")
@@ -36,16 +36,6 @@ RES = {
     "sumber_dana": {
         "judul": "Sumber Dana", "tabel": "sumber_dana", "urut": "kode", "unik": ["kode"],
         "fields": [F("kode", "Kode", req=1), F("nama", "Nama", req=1)], "list": ["kode", "nama"],
-    },
-    "pagu": {
-        "judul": "Pagu per Rekening", "tabel": "pagu", "urut": "tahun DESC, sumber_dana_id, kode_rekening", "tahunFilter": "tahun",
-        "unik": ["tahun", "sumber_dana_id", "program", "kegiatan", "sub_kegiatan", "kode_rekening"],
-        "imp": {"sumber_dana_id": ["sumber_dana", "sumber_dana", "kode"]},
-        "fields": [F("tahun", "Tahun", "number", req=1), F("sumber_dana_id", "Sumber dana", "ref", req=1, ref="sumber_dana", refLabel="kode"),
-                   F("program", "Program"), F("kegiatan", "Kegiatan"), F("sub_kegiatan", "Sub kegiatan"),
-                   F("kode_rekening", "Kode rekening belanja", req=1), F("uraian", "Uraian rekening"),
-                   F("pagu", "Pagu (Rp)", "rupiah", req=1)],
-        "list": ["tahun", "sumber_dana_id", "kegiatan", "kode_rekening", "uraian", "pagu"],
     },
     "lokasi": {
         "judul": "Lokasi Tujuan", "tabel": "lokasi", "urut": "jenis, nama", "unik": ["nama", "jenis"],
@@ -95,7 +85,7 @@ RES = {
     "users": {
         "judul": "Pengguna", "tabel": "users", "urut": "username", "onlyKepala": 1, "unik": ["username"],
         "fields": [F("username", "Username", req=1), F("nama", "Nama", req=1),
-                   F("role", "Hak akses", "select", req=1, opts=[["kepala", "Kepala Puskesmas"], ["bendahara", "Bendahara"], ["program", "Pengelola Program"], ["pegawai", "Pegawai"]]),
+                   F("role", "Hak akses", "select", req=1, opts=[["kepala", "Kepala Puskesmas"], ["bendahara", "Bendahara (BOK/DAU)"], ["bendahara_blud", "Bendahara BLUD"], ["program", "Pengelola Program"], ["pegawai", "Pegawai"]]),
                    F("pegawai_id", "Terkait pegawai", "ref", ref="pegawai", refLabel="nama"),
                    F("password", "Password (isi untuk mengubah)", "password", virtual=1), AKTIF],
         "list": ["username", "nama", "role", "aktif"],
@@ -255,7 +245,8 @@ def meta(user=Depends(auth)):
             continue
         m[k] = {"judul": r["judul"], "fields": r["fields"], "list": r["list"], "tahunFilter": r.get("tahunFilter"),
                 "noCreate": r.get("noCreate"), "noDelete": r.get("noDelete")}
-    return {"user": user, "meta": m, "bisaTulis": bisa_tulis(user), "bisaBaca": bisa_baca(user)}
+    akses = {k: {a: akses_sumber(user, k, a) for a in ("baca", "pagu", "rencana")} for k in ("BOK", "DAU", "BLUD")}
+    return {"user": user, "meta": m, "bisaTulis": bisa_tulis(user), "bisaBaca": bisa_baca(user), "akses": akses}
 
 
 @router.get("/data/{res}")
@@ -440,14 +431,14 @@ def export_xlsx(user=Depends(auth), db=Depends(get_db)):
         if not r.get("onlyKepala"):
             sheet(k, db.execute(f"SELECT * FROM {r['tabel']} ORDER BY id").fetchall())
     if bisa_tulis(user):
-        sheet("riwayat", db.execute("SELECT * FROM audit_log ORDER BY id").fetchall())
+        sheet("riwayat", db.execute("SELECT * FROM audit_log WHERE (sumber IS NULL OR sumber!='BLUD' OR ?) ORDER BY id", (1 if akses_sumber(user, "BLUD") else 0,)).fetchall())
     return _xlsx_resp(wb, f"sikadin_data_{dt.date.today().isoformat()}.xlsx")
 
 
 @router.get("/backup")
 def backup(user=Depends(auth), db=Depends(get_db)):
-    if not bisa_tulis(user):
-        raise Gagal("Tidak ada akses.", 403)
+    if user["role"] != "kepala":
+        raise Gagal("Backup seluruh database (termasuk data BLUD) hanya dapat diunduh oleh Kepala Puskesmas.", 403)
     tmp = os.path.join(tempfile.gettempdir(), f"sikadin_backup_{int(time.time())}.db")
     db.commit()
     db.execute(f"VACUUM INTO '{tmp.replace(chr(39), chr(39) * 2)}'")
@@ -457,7 +448,10 @@ def backup(user=Depends(auth), db=Depends(get_db)):
 
 @router.get("/riwayat")
 def riwayat(tabel: str | None = None, user=Depends(auth), db=Depends(get_db)):
-    if not bisa_tulis(user):
+    if not (bisa_tulis(user) or user["role"] == "bendahara_blud"):
         raise Gagal("Hanya Kepala/Bendahara.", 403)
-    sql, a = "SELECT * FROM audit_log" + (" WHERE tabel=?" if tabel else "") + " ORDER BY id DESC LIMIT 300", ([tabel] if tabel else [])
-    return db.execute(sql, a).fetchall()
+    q, a = ["(sumber IS NULL OR sumber!='BLUD' OR ?)"], [1 if akses_sumber(user, "BLUD") else 0]   # catatan BLUD hanya untuk yang berwenang
+    if tabel:
+        q.append("tabel=?")
+        a.append(tabel)
+    return db.execute(f"SELECT * FROM audit_log WHERE {' AND '.join(q)} ORDER BY id DESC LIMIT 300", a).fetchall()

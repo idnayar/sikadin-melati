@@ -2,7 +2,7 @@
 const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const rp = n => n === null || n === undefined || n === '' ? '' : 'Rp' + Number(n).toLocaleString('id-ID');
-const ROLE = { kepala: 'Kepala Puskesmas', bendahara: 'Bendahara', program: 'Pengelola Program', pegawai: 'Pegawai' };
+const ROLE = { kepala: 'Kepala Puskesmas', bendahara: 'Bendahara', bendahara_blud: 'Bendahara BLUD', program: 'Pengelola Program', pegawai: 'Pegawai' };
 let S = { meta: {}, user: null, bisaTulis: false, bisaBaca: false, refs: {}, tahun: 2026 };
 
 async function api(url, opt = {}) {
@@ -51,7 +51,7 @@ function dialog(judul, bodyHtml, onSave, saveLabel = 'Simpan') {
 
 // ---------- navigasi ----------
 const MENU = [
-  ['Anggaran', [['bok', 'Pagu Anggaran BOK'], ['pagu', 'Pagu Anggaran DAU & BLUD'], ['rencana', 'Perencanaan (RPK/POA)']]],
+  ['Anggaran', [['bok', 'Pagu Anggaran BOK'], ['dau', 'Pagu Anggaran DAU'], ['blud', 'Pagu Anggaran BLUD'], ['rencana', 'Perencanaan (RPK/POA)']]],
   ['Dinas Luar', [['jadwal', 'Jadwal Dinas Luar']]],
   ['Master Data', [['pegawai', 'Pegawai'], ['sumber_dana', 'Sumber Dana'], ['lokasi', 'Lokasi Tujuan'], ['tarif', 'Tarif Perbup'], ['pejabat', 'Pejabat'], ['libur', 'Hari Libur'], ['cuti', 'Cuti Pegawai'], ['pengaturan', 'Pengaturan & Kop']]],
   ['Alat', [['kalkulator', 'Kalkulator Biaya'], ['riwayat', 'Riwayat Perubahan'], ['data', 'Backup & Ekspor']]],
@@ -60,7 +60,7 @@ const MENU = [
 function buildNav() {
   let h = '';
   for (const [g, items] of MENU) {
-    const vis = items.filter(([k]) => S.meta[k] || (['kalkulator', 'data', 'bok', 'rencana', 'jadwal'].includes(k) && S.bisaBaca) || (k === 'riwayat' && S.bisaTulis));
+    const vis = items.filter(([k]) => S.meta[k] || (['kalkulator', 'data', 'rencana', 'jadwal'].includes(k) && S.bisaBaca) || (['bok', 'dau', 'blud'].includes(k) && S.akses[k.toUpperCase()].baca) || (k === 'riwayat' && (S.bisaTulis || S.user.role === 'bendahara_blud')));
     if (!vis.length) continue;
     h += `<h4>${g}</h4>` + vis.map(([k, l]) => `<a data-k="${k}">${l}</a>`).join('');
   }
@@ -74,7 +74,7 @@ async function route() {
   const m = $('#main');
   try {
     if (!S.bisaBaca) m.innerHTML = `<div class="card"><h2>Selamat datang, ${esc(S.user.nama)}</h2><p class="muted">Jadwal, Surat Tugas, dan rincian uang Anda akan tampil di sini pada tahap berikutnya.</p></div>`;
-    else if (k === 'bok') await viewBok(m);
+    else if (['bok', 'dau', 'blud'].includes(k)) await viewBok(m, k.toUpperCase());
     else if (k === 'rencana') await viewRencana(m);
     else if (k === 'jadwal') await viewJadwal(m);
     else if (k === 'kalkulator') await viewKalkulator(m);
@@ -163,10 +163,10 @@ const fmt = v => Number(v).toLocaleString('id-ID', { maximumFractionDigits: 2 })
 const volTxt = b => [[b.vol1, b.sat1], [b.vol2, b.sat2], [b.vol3, b.sat3]].filter(([v, s]) => Number(v) !== 1 || s).map(([v, s]) => `${fmt(v)}${s ? ' ' + esc(s) : ''}`).join(' × ') || '1';
 S.bokTahun = 2027; S.bokOpen = new Set(); S.bokCari = '';
 
-async function viewBok(m) {
+async function viewBok(m, kode = 'BOK') {
   const T = S.bokTahun;
-  const [tr, tahunList] = await Promise.all([api('/api/bok/' + T), api('/api/bok/tahun')]);
-  const rw = S.bisaTulis, pagu = tr.pagu ? tr.pagu.pagu : 0, selisih = pagu - tr.total;
+  const [tr, tahunList] = await Promise.all([api(`/api/bok/${T}?sumber=${kode}`), api(`/api/bok/tahun?sumber=${kode}`)]);
+  const rw = S.akses[kode].pagu, pagu = tr.pagu ? tr.pagu.pagu : 0, selisih = pagu - tr.total;
   const nR = tr.menu.reduce((s, x) => s + x.rincian.length, 0), nB = tr.menu.reduce((s, x) => s + x.rincian.reduce((a, r) => a + r.baris.length, 0), 0);
   const jenisList = [...new Set(tr.menu.flatMap(x => x.rincian.flatMap(r => r.baris.map(b => b.jenis_belanja))))];
   const q = S.bokCari.toLowerCase();
@@ -193,7 +193,7 @@ async function viewBok(m) {
       <div class="acts" style="margin:8px 0">${btn('tmb-rinc', mn.id, '+ Rincian Menu', 'primary')} ${btn('ub-menu', mn.id, 'Ubah menu')} ${btn('hps-menu', mn.id, 'Hapus menu', 'danger')}</div>${rinc || '<p class="muted">Belum ada rincian menu.</p>'}</details>`;
   }).join('');
 
-  m.innerHTML = `<h2>Pagu Anggaran BOK</h2><p class="muted">Rencana Anggaran Biaya (RAB) BOK Puskesmas: Menu → Rincian Menu → baris biaya. Baris-baris inilah yang nanti dipakai Perencanaan, Panjar, dan SPJ.</p>
+  m.innerHTML = `<h2>Pagu Anggaran ${kode}</h2><p class="muted">Rencana Anggaran Biaya (RAB) ${kode} Puskesmas${kode === 'BLUD' ? ' — <b>khusus Kepala Puskesmas &amp; Bendahara BLUD</b>' : ''}: Menu → Rincian Menu → baris biaya. Baris-baris inilah yang nanti dipakai Perencanaan, Panjar, dan SPJ.</p>
   <div class="bar"><label style="display:flex;gap:6px;align-items:center">Tahun <input id="bThn" type="number" value="${T}" style="width:90px" list="bThnList"></label>
    <datalist id="bThnList">${tahunList.map(t => `<option value="${t}">`).join('')}</datalist>
    <input id="bCari" type="search" placeholder="Cari kegiatan / belanja…" value="${esc(S.bokCari)}" aria-label="Cari">
@@ -206,9 +206,9 @@ async function viewBok(m) {
    <div class="card"><span class="muted">Total RAB (jumlah baris)</span><b>${rp(tr.total)}</b><span class="muted">${tr.menu.length} menu · ${nR} rincian · ${nB} baris</span></div>
    <div class="card"><span class="muted">${selisih < 0 ? 'Melebihi pagu' : selisih === 0 ? 'Selisih' : 'Belum teralokasi'}</span><b class="${selisih < 0 ? 'err' : selisih === 0 ? 'okc' : 'warn'}">${rp(Math.abs(selisih))}</b>
     <span class="muted">${selisih === 0 && pagu ? '✓ RAB sama dengan pagu' : selisih < 0 ? 'Kurangi baris atau naikkan pagu' : ''}</span></div></div>
-  ${tr.menu.length ? menus : `<div class="card"><p>Belum ada RAB BOK untuk tahun ${T}.</p>${rw ? '<p class="muted">Tambah menu satu per satu, atau gunakan <b>Impor RAB Excel</b> (format RAB BOK Puskesmas).</p>' : ''}</div>`}`;
+  ${tr.menu.length ? menus : `<div class="card"><p>Belum ada RAB ${kode} untuk tahun ${T}.</p>${rw ? '<p class="muted">Tambah menu satu per satu, atau gunakan <b>Impor RAB Excel</b> (format RAB BOK Puskesmas; untuk ${kode} susun manual atau gunakan format yang sama).</p>' : ''}</div>`}`;
 
-  const reload = async () => { await viewBok(m); };
+  const reload = async () => { await viewBok(m, kode); };
   $('#bThn').onchange = e => { S.bokTahun = Number(e.target.value) || T; reload(); };
   $('#bCari').oninput = e => { S.bokCari = e.target.value; clearTimeout(viewBok.t); viewBok.t = setTimeout(async () => { await reload(); const c = $('#bCari'); c.focus(); c.setSelectionRange(c.value.length, c.value.length); }, 300); };
   m.querySelectorAll('details.menu').forEach(d => d.addEventListener('toggle', () => { const id = Number(d.dataset.m); d.open ? S.bokOpen.add(id) : S.bokOpen.delete(id); }));
@@ -238,7 +238,7 @@ async function viewBok(m) {
   m.onclick = async e => {
     const el = e.target.closest('[data-act]'); if (!el) return;
     e.preventDefault(); const act = el.dataset.act, id = Number(el.dataset.id);
-    if (act === 'tmb-menu') dialog('Tambah Menu', formNoNama({}, 'No. menu', 'Nama menu'), async d => { await api('/api/bok/menu', { method: 'POST', body: { ...d, tahun: T } }); await done('Menu ditambahkan.')(); });
+    if (act === 'tmb-menu') dialog('Tambah Menu', formNoNama({}, 'No. menu', 'Nama menu'), async d => { await api('/api/bok/menu', { method: 'POST', body: { ...d, tahun: T, sumber: kode } }); await done('Menu ditambahkan.')(); });
     else if (act === 'ub-menu') { const x = menuById(id); dialog('Ubah Menu', formNoNama(x, 'No. menu', 'Nama menu'), async d => { await api('/api/bok/menu/' + id, { method: 'PUT', body: d }); await done('Menu diubah.')(); }); }
     else if (act === 'hps-menu') { const x = menuById(id); dialog('Hapus menu?', `<p>Menu <b>${esc(x.nama)}</b> beserta ${x.rincian.length} rincian dan ${x.rincian.reduce((s, r) => s + r.baris.length, 0)} baris (${rp(x.total)}) akan dihapus. Tercatat di riwayat.</p>`, async () => { await api('/api/bok/menu/' + id, { method: 'DELETE' }); await done('Menu dihapus.')(); }, 'Hapus'); }
     else if (act === 'tmb-rinc') dialog('Tambah Rincian Menu', formNoNama({}, 'No. rincian', 'Nama rincian menu'), async d => { S.bokOpen.add(id); await api('/api/bok/rincian', { method: 'POST', body: { ...d, menu_id: id } }); await done('Rincian ditambahkan.')(); });
@@ -248,20 +248,20 @@ async function viewBok(m) {
     else if (act === 'ub-baris') { dialog('Ubah Baris Biaya', formBaris(barisById(id)), async d => { await api('/api/bok/baris/' + id, { method: 'PUT', body: d }); await done('Baris diubah.')(); }); liveJumlah(); }
     else if (act === 'dup-baris') { await api(`/api/bok/baris/${id}/duplikat`, { method: 'POST' }); await done('Baris disalin.')(); }
     else if (act === 'hps-baris') { const b = barisById(id); dialog('Hapus baris?', `<p>${esc(b.komponen || b.uraian || b.jenis_belanja)} — ${rp(b.jumlah)} akan dihapus. Tercatat di riwayat.</p>`, async () => { await api('/api/bok/baris/' + id, { method: 'DELETE' }); await done('Baris dihapus.')(); }, 'Hapus'); }
-    else if (act === 'ub-pagu') dialog('Pagu BOK ' + T, `<label>Jenis<select name="jenis">${['Pagu Indikatif', 'Pagu Definitif', 'Pagu Perubahan'].map(j => `<option ${tr.pagu && tr.pagu.jenis === j ? 'selected' : ''}>${j}</option>`).join('')}</select></label>
+    else if (act === 'ub-pagu') dialog('Pagu ' + kode + ' ' + T, `<label>Jenis<select name="jenis">${['Pagu Indikatif', 'Pagu Definitif', 'Pagu Perubahan'].map(j => `<option ${tr.pagu && tr.pagu.jenis === j ? 'selected' : ''}>${j}</option>`).join('')}</select></label>
       <label>Jumlah pagu (Rp)<input name="pagu" type="number" min="0" step="1" required value="${pagu}"></label><label>Keterangan<input name="keterangan" value="${esc(tr.pagu?.keterangan ?? '')}"></label>`,
-      async d => { await api(`/api/bok/${T}/pagu`, { method: 'PUT', body: d }); await done('Pagu disimpan.')(); });
-    else if (act === 'hps-semua') dialog('Kosongkan RAB BOK ' + T + '?', `<p>Seluruh ${tr.menu.length} menu, ${nR} rincian, dan ${nB} baris tahun ${T} akan dihapus (pagu tetap). Tercatat di riwayat.</p>`, async () => { await api('/api/bok/' + T, { method: 'DELETE' }); await done('RAB dikosongkan.')(); }, 'Kosongkan');
-    else if (act === 'exp-rab') download(`/api/bok/${T}/export.xlsx`, `RAB_BOK_${T}.xlsx`);
+      async d => { await api(`/api/bok/${T}/pagu?sumber=${kode}`, { method: 'PUT', body: d }); await done('Pagu disimpan.')(); });
+    else if (act === 'hps-semua') dialog('Kosongkan RAB ' + kode + ' ' + T + '?', `<p>Seluruh ${tr.menu.length} menu, ${nR} rincian, dan ${nB} baris tahun ${T} akan dihapus (pagu tetap). Tercatat di riwayat.</p>`, async () => { await api(`/api/bok/${T}?sumber=${kode}`, { method: 'DELETE' }); await done('RAB dikosongkan.')(); }, 'Kosongkan');
+    else if (act === 'exp-rab') download(`/api/bok/${T}/export.xlsx?sumber=${kode}`, `RAB_${kode}_${T}.xlsx`);
     else if (act === 'imp-rab') {
       let hasil = null;
-      dialog('Impor RAB BOK', `<p class="muted">Pilih berkas RAB BOK Puskesmas (.xlsx). Menu, rincian, dan baris dibaca otomatis; pagu diisi dari "Jumlah Total Kebutuhan Anggaran" bila belum ada.</p>
+      dialog('Impor RAB ' + kode, `<p class="muted">Pilih berkas RAB ${kode} Puskesmas (.xlsx; format sama dengan RAB BOK). Menu, rincian, dan baris dibaca otomatis; pagu diisi dari "Jumlah Total Kebutuhan Anggaran" bila belum ada.</p>
         <input type="file" name="berkas" accept=".xlsx,.xls" required><label>Tahun<input name="tahun" type="number" value="${T}"></label>
         <label style="grid-auto-flow:column;justify-content:start;align-items:center;gap:8px"><input type="checkbox" name="ganti" ${tr.menu.length ? 'checked' : ''}> Ganti RAB tahun ini bila sudah ada</label>`,
         async d => {
           const file = $('#dlgForm input[type=file]').files[0]; if (!file) throw new Error('Pilih berkas.');
           const b64 = btoa(new Uint8Array(await file.arrayBuffer()).reduce((s, x) => s + String.fromCharCode(x), ''));
-          hasil = await api('/api/bok/import', { method: 'POST', body: { file: b64, tahun: Number(d.tahun), ganti: d.ganti } });
+          hasil = await api('/api/bok/import', { method: 'POST', body: { file: b64, tahun: Number(d.tahun), ganti: d.ganti, sumber: kode } });
           S.bokTahun = hasil.tahun; await reload();
           setTimeout(() => dialog('Impor selesai', `<p>Tahun <b>${hasil.tahun}</b>: ${hasil.menu} menu, ${hasil.baris} baris, total <b>${rp(hasil.total)}</b>.</p>${(hasil.peringatan || []).map(p => `<p class="warn">⚠ ${esc(p)}</p>`).join('')}`), 150);
         }, 'Impor');
@@ -272,15 +272,18 @@ async function viewBok(m) {
 // ---------- Perencanaan (RPK/POA) ----------
 const BLN = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
 const STATUS = ['Draft', 'Diajukan', 'Ditolak', 'Disetujui', 'Terjadwal', 'Terlaksana', 'SPJ Selesai'];
-S.rcTab = 'daftar'; S.rcBulan = ''; S.rcStatus = '';
+S.rcTab = 'daftar'; S.rcBulan = ''; S.rcStatus = ''; S.rcSumber = null;
 
 async function viewRencana(m) {
-  const T = S.bokTahun, rw = S.user.role !== 'pegawai', kepala = S.user.role === 'kepala';
+  const bolehSumber = ['BOK', 'DAU', 'BLUD'].filter(k => S.akses[k].baca);
+  if (!S.rcSumber || !bolehSumber.includes(S.rcSumber)) S.rcSumber = bolehSumber[0];
+  const kode = S.rcSumber;
+  const T = S.bokTahun, rw = S.akses[kode].rencana, kepala = S.user.role === 'kepala';
   await refs();
-  const qs = `tahun=${T}` + (S.rcBulan ? `&bulan=${S.rcBulan}` : '') + (S.rcStatus ? `&status=${encodeURIComponent(S.rcStatus)}` : '');
-  const [list, poa, tr] = await Promise.all([api('/api/rencana?' + qs), api('/api/rencana/poa?tahun=' + T), api('/api/bok/' + T)]);
+  const qs = `sumber=${kode}&tahun=${T}` + (S.rcBulan ? `&bulan=${S.rcBulan}` : '') + (S.rcStatus ? `&status=${encodeURIComponent(S.rcStatus)}` : '');
+  const [list, poa, tr] = await Promise.all([api('/api/rencana?' + qs), api(`/api/rencana/poa?tahun=${T}&sumber=${kode}`), api(`/api/bok/${T}?sumber=${kode}`)]);
   const aktif = x => x.status !== 'Ditolak';
-  const semua = S.rcBulan || S.rcStatus ? await api(`/api/rencana?tahun=${T}`) : list;
+  const semua = S.rcBulan || S.rcStatus ? await api(`/api/rencana?tahun=${T}&sumber=${kode}`) : list;
   const totalRencana = semua.filter(aktif).reduce((s, x) => s + x.estimasi, 0), disetujui = semua.filter(x => ['Disetujui', 'Terjadwal', 'Terlaksana', 'SPJ Selesai'].includes(x.status)).reduce((s, x) => s + x.estimasi, 0);
   const pagu = tr.pagu ? tr.pagu.pagu : 0;
   const bdg = s => `<span class="badge st-${s.replace(/ /g, '')}">${s}</span>`;
@@ -307,10 +310,11 @@ async function viewRencana(m) {
 
   m.innerHTML = `<h2>Perencanaan Kegiatan (RPK/POA) BOK</h2>
   <p class="muted">Setiap rencana terikat ke satu baris RAB. Estimasi dihitung otomatis dari tarif Perbup, dan ditolak bila melebihi pagu baris atau pagu BOK.</p>
-  <div class="kv"><div class="card"><span class="muted">Pagu BOK ${T}</span><b>${rp(pagu)}</b></div>
+  <div class="kv"><div class="card"><span class="muted">Pagu ${kode} ${T}</span><b>${rp(pagu)}</b></div>
    <div class="card"><span class="muted">Total direncanakan</span><b>${rp(totalRencana)}</b><span class="muted">${pagu ? (totalRencana / pagu * 100).toFixed(1) : 0}% dari pagu</span></div>
    <div class="card"><span class="muted">Sudah disetujui</span><b>${rp(disetujui)}</b></div>
    <div class="card"><span class="muted">Sisa pagu belum direncanakan</span><b class="${pagu - totalRencana < 0 ? 'err' : ''}">${rp(pagu - totalRencana)}</b></div></div>
+  <div class="tabs sumber">${bolehSumber.map(k => `<button class="tab ${k === kode ? 'on' : ''}" data-sumber="${k}">${k}</button>`).join('')}<span class="muted" style="margin-left:auto;align-self:center">Sumber dana</span></div>
   <div class="tabs"><button class="tab ${S.rcTab === 'daftar' ? 'on' : ''}" data-tab="daftar">Daftar Rencana</button><button class="tab ${S.rcTab === 'poa' ? 'on' : ''}" data-tab="poa">Matriks POA per Bulan</button></div>
   ${S.rcTab === 'daftar' ? `<div class="bar"><label style="display:flex;gap:6px;align-items:center">Tahun <input id="rThn" type="number" value="${T}" style="width:90px"></label>
     <select id="rBln"><option value="">Semua bulan</option>${BLN.map((b, i) => `<option value="${i + 1}" ${String(S.rcBulan) === String(i + 1) ? 'selected' : ''}>${b}</option>`).join('')}</select>
@@ -323,12 +327,13 @@ async function viewRencana(m) {
 
   const reload = () => viewRencana(m);
   m.querySelectorAll('[data-tab]').forEach(t => t.onclick = () => { S.rcTab = t.dataset.tab; reload(); });
+  m.querySelectorAll('[data-sumber]').forEach(t => t.onclick = () => { S.rcSumber = t.dataset.sumber; reload(); });
   if ($('#rThn')) { $('#rThn').onchange = e => { S.bokTahun = Number(e.target.value) || T; reload(); }; $('#rBln').onchange = e => { S.rcBulan = e.target.value; reload(); }; $('#rSt').onchange = e => { S.rcStatus = e.target.value; reload(); }; }
 
   const ubahStatus = async (id, ke, alasan) => { await api(`/api/rencana/${id}/status`, { method: 'POST', body: { ke, alasan } }); toast('Status: ' + ke); await reload(); };
   async function formRencana(r) {
-    const opsi = await api('/api/rencana/opsi?tahun=' + T);
-    if (!opsi.length) return toast('Belum ada RAB BOK untuk tahun ini. Isi dulu di Pagu Anggaran BOK.', 1);
+    const opsi = await api(`/api/rencana/opsi?tahun=${T}&sumber=${kode}`);
+    if (!opsi.length) return toast(`Belum ada RAB ${kode} untuk tahun ini. Isi dulu di Pagu Anggaran ${kode}.`, 1);
     const lok = S.refs.lokasi.filter(l => l.aktif), v = (k, d = '') => esc(r?.[k] ?? d);
     const grup = []; opsi.forEach(o => { let g = grup.find(x => x.id === o.rincian_id); if (!g) grup.push(g = { id: o.rincian_id, label: `Menu ${o.menu_no ?? ''} › ${o.rincian_no ?? ''}. ${o.rincian}`, items: [] }); g.items.push(o); });
     const optPos = grup.map(g => `<optgroup label="${esc(g.label.slice(0, 90))}">${g.items.map(o => `<option value="${o.id}" ${r?.baris_id === o.id ? 'selected' : ''}>${esc((o.komponen ? o.komponen + ' · ' : '') + (o.uraian || o.jenis_belanja))} — sisa ${rp(o.sisa + (r?.baris_id === o.id ? r.estimasi : 0))}</option>`).join('')}</optgroup>`).join('');
@@ -487,7 +492,7 @@ async function viewJadwal(m) {
         beban petugas dibagi merata, dan <b>satu ruangan tidak boleh ditinggal lebih dari ${esc(persen)}% pegawainya</b> pada hari yang sama. Hasil ditampilkan dulu sebagai pratinjau.</p>
       <label>Hari kerja<select name="hari_kerja"><option value="5">Senin – Jumat</option><option value="6">Senin – Sabtu</option></select></label>
       <div><div class="bar" style="margin:4px 0"><b>Rencana yang dijadwalkan</b><span style="flex:1"></span><button type="button" class="btn small" id="gAll">Pilih semua</button><button type="button" class="btn small" id="gNone">Kosongkan</button></div>
-       <div class="plist">${siap.map(r => `<label class="prow on"><input type="checkbox" data-r="${r.id}" checked><span><b>${esc(r.kegiatan.slice(0, 80))}</b>
+       <div class="plist">${siap.map(r => `<label class="prow on"><input type="checkbox" data-r="${r.id}" checked><span><b>[${esc(r.dana)}] ${esc(r.kegiatan.slice(0, 80))}</b>
          <span class="muted"> · ${esc(r.lokasi || 'tanpa lokasi')} · ${r.jumlah_petugas} petugas × ${r.jumlah_hari} hr · ${r.frekuensi - r.terjadwal} pelaksanaan tersisa</span></span></label>`).join('')}</div></div>`,
       async d => {
         const ids = [...document.querySelectorAll('#dlgForm [data-r]:checked')].map(x => Number(x.dataset.r));
@@ -524,7 +529,7 @@ async function viewJadwal(m) {
     if (!j && !siap.length) return toast(`Belum ada rencana Disetujui yang masih bisa dijadwalkan pada tahun ${Y}. Setujui rencana di menu Perencanaan.`, 1);
     const pilih = new Set((j?.petugas || []).map(p => p.id)); let selesaiManual = !!j;
     const lok = S.refs.lokasi.filter(l => l.aktif);
-    const rencOpt = j ? `<option value="${j.rencana_id}">${esc(j.kegiatan)}</option>` : '<option value="">— pilih rencana yang sudah disetujui —</option>' + siap.map(r => `<option value="${r.id}">${BLN[r.bulan - 1].slice(0, 3)} · ${esc(r.kegiatan.slice(0, 70))} — ${r.terjadwal}/${r.frekuensi} terjadwal</option>`).join('');
+    const rencOpt = j ? `<option value="${j.rencana_id}">${esc(j.kegiatan)}</option>` : '<option value="">— pilih rencana yang sudah disetujui —</option>' + siap.map(r => `<option value="${r.id}">${BLN[r.bulan - 1].slice(0, 3)} · [${esc(r.dana)}] ${esc(r.kegiatan.slice(0, 70))} — ${r.terjadwal}/${r.frekuensi} terjadwal</option>`).join('');
     dialog(j ? 'Ubah Jadwal #' + j.id : 'Tambah Jadwal Dinas Luar', `
       <label>Rencana kegiatan<select name="rencana_id" ${j ? 'disabled' : 'required'}>${rencOpt}</select></label>
       <div class="grid2"><label>Tanggal mulai<input name="mulai" type="date" value="${j ? j.mulai : tglAwal || ''}" required></label>
@@ -638,7 +643,7 @@ async function viewRiwayat(m) {
 function viewData(m) {
   m.innerHTML = `<h2>Backup & Ekspor</h2><div class="card" style="display:grid;gap:10px;max-width:520px">
    <div><b>Ekspor seluruh data ke Excel</b><p class="muted">Satu sheet per tabel master (plus riwayat untuk Kepala/Bendahara).</p><button class="btn primary" id="x1">Unduh Excel</button></div>
-   ${S.bisaTulis ? `<div><b>Backup database</b><p class="muted">Salinan utuh basis data (.db). Simpan di tempat aman secara berkala.</p><button class="btn" id="x2">Unduh backup</button></div>` : ''}</div>`;
+   ${S.user.role === 'kepala' ? `<div><b>Backup database</b><p class="muted">Salinan utuh basis data (.db). Simpan di tempat aman secara berkala.</p><button class="btn" id="x2">Unduh backup</button></div>` : ''}</div>`;
   $('#x1').onclick = () => download('/api/export/xlsx', 'sikadin_data.xlsx');
   if ($('#x2')) $('#x2').onclick = () => download('/api/backup', 'sikadin_backup.db');
 }
@@ -647,7 +652,7 @@ function viewData(m) {
 async function start() {
   try {
     const m = await api('/api/meta');
-    S.meta = m.meta; S.user = m.user; S.bisaTulis = m.bisaTulis; S.bisaBaca = m.bisaBaca;
+    S.meta = m.meta; S.user = m.user; S.bisaTulis = m.bisaTulis; S.bisaBaca = m.bisaBaca; S.akses = m.akses;
   } catch { return showLogin(); }
   $('#login').hidden = true; $('#app').hidden = false;
   $('#who').textContent = `${S.user.nama} · ${ROLE[S.user.role]}`;
