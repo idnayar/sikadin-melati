@@ -53,6 +53,7 @@ function dialog(judul, bodyHtml, onSave, saveLabel = 'Simpan') {
 const MENU = [
   ['Anggaran', [['bok', 'Pagu Anggaran BOK'], ['dau', 'Pagu Anggaran DAU'], ['blud', 'Pagu Anggaran BLUD'], ['rencana', 'Perencanaan (RPK/POA)']]],
   ['Dinas Luar', [['jadwal', 'Jadwal Dinas Luar'], ['st', 'Surat Tugas & SPD'], ['nomor', 'Penomoran Surat']]],
+  ['Keuangan', [['spj', 'Realisasi & SPJ']]],
   ['Master Data', [['pegawai', 'Pegawai'], ['sumber_dana', 'Sumber Dana'], ['lokasi', 'Lokasi Tujuan'], ['tarif', 'Tarif Perbup'], ['pejabat', 'Pejabat'], ['libur', 'Hari Libur'], ['cuti', 'Cuti Pegawai'], ['pengaturan', 'Pengaturan & Kop']]],
   ['Alat', [['kalkulator', 'Kalkulator Biaya'], ['riwayat', 'Riwayat Perubahan'], ['data', 'Backup & Ekspor']]],
   ['Sistem', [['users', 'Pengguna']]],
@@ -60,11 +61,11 @@ const MENU = [
 function buildNav() {
   let h = '';
   for (const [g, items] of MENU) {
-    const vis = items.filter(([k]) => S.meta[k] || (['kalkulator', 'data', 'rencana', 'jadwal', 'nomor'].includes(k) && S.bisaBaca) || k === 'st' || (['bok', 'dau', 'blud'].includes(k) && S.akses[k.toUpperCase()].baca) || (k === 'riwayat' && (S.bisaTulis || S.user.role === 'bendahara_blud')));
+    const vis = items.filter(([k]) => S.meta[k] || (['kalkulator', 'data', 'rencana', 'jadwal', 'nomor'].includes(k) && S.bisaBaca) || k === 'st' || k === 'spj' || (['bok', 'dau', 'blud'].includes(k) && S.akses[k.toUpperCase()].baca) || (k === 'riwayat' && (S.bisaTulis || S.user.role === 'bendahara_blud')));
     if (!vis.length) continue;
     h += `<h4>${g}</h4>` + vis.map(([k, l]) => `<a data-k="${k}">${l}</a>`).join('');
   }
-  if (!S.bisaBaca) h = '<h4>Dinas Luar</h4><a data-k="st">Surat Tugas &amp; SPD Saya</a>';
+  if (!S.bisaBaca) h = '<h4>Dinas Luar</h4><a data-k="st">Surat Tugas &amp; SPD Saya</a><h4>Keuangan</h4><a data-k="spj">SPJ Saya</a>';
   $('#nav').innerHTML = h;
   $('#nav').onclick = e => { const k = e.target.dataset.k; if (k) { location.hash = k; $('#nav').classList.remove('open'); } };
 }
@@ -74,6 +75,7 @@ async function route() {
   const m = $('#main');
   try {
     if (k === 'st') await viewSurat(m);
+    else if (k === 'spj') await viewSpj(m);
     else if (k === 'nomor' && S.bisaBaca) await viewNomor(m);
     else if (!S.bisaBaca) m.innerHTML = `<div class="card"><h2>Selamat datang, ${esc(S.user.nama)}</h2><p class="muted">Jadwal, Surat Tugas, dan rincian uang Anda akan tampil di sini pada tahap berikutnya.</p></div>`;
     else if (['bok', 'dau', 'blud'].includes(k)) await viewBok(m, k.toUpperCase());
@@ -593,6 +595,108 @@ async function viewJadwal(m) {
       } catch (x) { toast(x.message, 1); }
     };
   }
+}
+
+// ---------- Realisasi & SPJ ----------
+S.spTab = 'spj'; S.spStatus = ''; S.spSumber = '';
+const SP_BADGE = { Draft: 'st-Draft', Diajukan: 'st-Diajukan', Dikembalikan: 'st-Ditolak', Diverifikasi: 'st-Terjadwal', Dibayar: 'st-Terlaksana' };
+async function viewSpj(m) {
+  const T = S.bokTahun, penuhRole = S.bisaBaca;
+  const sumberOk = ['BOK', 'DAU', 'BLUD'].filter(k => S.akses && S.akses[k].baca);
+  if (!S.spSumber || !sumberOk.includes(S.spSumber)) S.spSumber = sumberOk[0] || '';
+  const tab = !penuhRole ? 'spj' : S.spTab;
+  const q = `tahun=${T}` + (S.spStatus ? `&status=${S.spStatus}` : '');
+  const [daftar, belum] = await Promise.all([api('/api/spj?' + q), api('/api/spj/belum?tahun=' + T)]);
+  const rgk = penuhRole && tab === 'realisasi' && S.spSumber ? await api(`/api/spj/ringkasan?tahun=${T}&sumber=${S.spSumber}`) : null;
+  const baris = x => `<tr><td style="white-space:nowrap">${tglID(x.tanggal)}</td><td><b>${esc(x.pegawai_nama || x.penerima || '-')}</b><br><span class="muted">${esc(x.uraian)}</span></td>
+    <td>${x.dana}</td><td class="num">${rp(x.total)}</td><td><span class="badge ${SP_BADGE[x.status]}">${x.status}</span>${x.no_bukti ? `<br><span class="muted" style="font-size:.8em">${esc(x.no_bukti)}</span>` : ''}</td>
+    <td><button class="btn small" data-spj="${x.id}">Buka</button></td></tr>`;
+  const bar = (p) => `<div class="persen"><i style="width:${Math.min(100, p)}%"></i></div>`;
+  let isi = '';
+  if (tab === 'spj') {
+    isi = `<div class="tbl-wrap"><table><thead><tr><th>Tanggal</th><th>Penerima / uraian</th><th>Dana</th><th>Jumlah</th><th>Status</th><th></th></tr></thead><tbody>${daftar.map(baris).join('') || '<tr><td colspan="6" class="muted">Belum ada SPJ.</td></tr>'}</tbody></table></div>`;
+  } else if (tab === 'belum') {
+    isi = `<p class="muted">Perjalanan dinas yang ST/SPD-nya sudah terbit tetapi SPJ-nya belum dibuat.</p><div class="tbl-wrap"><table><thead><tr><th>ST</th><th>Petugas</th><th>Kegiatan</th><th>Tanggal</th><th>Biaya SPD</th><th></th></tr></thead><tbody>
+      ${belum.map(x => `<tr><td style="white-space:nowrap">${esc(x.nomor)}<br><span class="muted">${x.dana}</span></td><td>${esc(x.pegawai)}</td><td>${esc(x.maksud)}</td><td>${tglID(x.mulai)}${x.selesai !== x.mulai ? ' – ' + tglID(x.selesai) : ''}</td><td class="num">${rp(x.total)}</td><td><button class="btn small primary" data-buat="${x.spd_id}">Buat SPJ</button></td></tr>`).join('') || '<tr><td colspan="6" class="muted">Semua SPD sudah memiliki SPJ.</td></tr>'}</tbody></table></div>`;
+  } else if (rgk) {
+    const t = rgk.total;
+    isi = `<div class="tabs sumber">${sumberOk.map(k => `<button class="tab ${k === S.spSumber ? 'on' : ''}" data-sumber="${k}">${k}</button>`).join('')}</div>
+      <div class="cards"><div class="card"><small>Pagu</small><b>${rp(t.pagu)}</b></div><div class="card"><small>Realisasi (dibayar)</small><b>${rp(t.realisasi)}</b></div><div class="card"><small>Dalam proses SPJ</small><b>${rp(t.proses)}</b></div><div class="card"><small>Sisa pagu</small><b>${rp(t.sisa)}</b></div><div class="card"><small>Serapan</small><b>${t.persen}%</b></div></div>
+      <div class="bar"><a class="btn small" href="/api/spj/rekap/dok?tahun=${T}&sumber=${S.spSumber}">Rekap PDF</a><button class="btn small" data-rekap="docx">Rekap DOCX</button><button class="btn small" data-rekap="xlsx">Rekap XLSX</button></div>
+      <div class="tbl-wrap"><table><thead><tr><th>Menu / rincian / baris</th><th>Pagu</th><th>Realisasi</th><th>Proses</th><th>Sisa</th><th>Serapan</th></tr></thead><tbody>
+      ${rgk.menu.map(mn => `<tr class="grp"><td><b>${esc(mn.no)} ${esc(mn.nama)}</b></td><td class="num">${rp(mn.pagu)}</td><td class="num">${rp(mn.realisasi)}</td><td class="num">${rp(mn.proses)}</td><td class="num">${rp(mn.sisa)}</td><td>${mn.persen}%</td></tr>`
+        + mn.rincian.map(ri => `<tr><td style="padding-left:18px"><b>${esc(ri.nama)}</b></td><td class="num">${rp(ri.pagu)}</td><td class="num">${rp(ri.realisasi)}</td><td class="num">${rp(ri.proses)}</td><td class="num">${rp(ri.sisa)}</td><td>${ri.persen}%</td></tr>`
+          + ri.baris.map(b => `<tr><td style="padding-left:36px" class="muted">${esc(b.uraian)}</td><td class="num">${rp(b.pagu)}</td><td class="num">${rp(b.realisasi)}</td><td class="num">${rp(b.proses)}</td><td class="num">${rp(b.sisa)}</td><td>${bar(b.persen)}</td></tr>`).join('')).join('')).join('') || '<tr><td colspan="6" class="muted">Belum ada RAB untuk tahun/sumber ini.</td></tr>'}</tbody></table></div>`;
+  }
+  m.innerHTML = `<h2>Realisasi &amp; SPJ</h2>
+   <p class="muted">${penuhRole ? 'Alur: Draft → Diajukan → Diverifikasi → Dibayar (tanpa panjar; dibayar setelah SPJ diverifikasi). Hanya SPJ <b>Dibayar</b> yang dihitung sebagai realisasi.' : 'SPJ perjalanan dinas Anda. Isi realisasi biaya dan nomor bukti, lalu ajukan ke bendahara.'}</p>
+   <div class="bar"><label style="display:flex;gap:6px;align-items:center">Tahun <input id="spTh" type="number" value="${T}" style="width:90px"></label>
+    ${tab === 'spj' ? `<select id="spSt"><option value="">Semua status</option>${['Draft', 'Diajukan', 'Dikembalikan', 'Diverifikasi', 'Dibayar'].map(x => `<option ${S.spStatus === x ? 'selected' : ''}>${x}</option>`).join('')}</select>` : ''}
+    <span style="flex:1"></span>${penuhRole && S.spSumber && S.akses[S.spSumber].rencana ? '<button class="btn" id="spUmum">+ Belanja non-perjalanan</button>' : ''}</div>
+   ${penuhRole ? `<div class="tabs"><button class="tab ${tab === 'spj' ? 'on' : ''}" data-tab="spj">Daftar SPJ</button><button class="tab ${tab === 'belum' ? 'on' : ''}" data-tab="belum">Belum dibuat (${belum.length})</button><button class="tab ${tab === 'realisasi' ? 'on' : ''}" data-tab="realisasi">Realisasi anggaran</button></div>`
+     : (belum.length ? `<div class="card"><b>Perjalanan dinas Anda yang belum dibuat SPJ-nya:</b>${belum.map(x => `<p>${tglID(x.mulai)} · ${esc(x.maksud)} (${rp(x.total)}) <button class="btn small primary" data-buat="${x.spd_id}">Buat SPJ</button></p>`).join('')}</div>` : '')}
+   ${isi}`;
+  const reload = () => viewSpj(m);
+  $('#spTh').onchange = e => { S.bokTahun = Number(e.target.value) || T; reload(); };
+  if ($('#spSt')) $('#spSt').onchange = e => { S.spStatus = e.target.value; reload(); };
+  m.querySelectorAll('[data-tab]').forEach(t => t.onclick = () => { S.spTab = t.dataset.tab; reload(); });
+  m.querySelectorAll('[data-sumber]').forEach(t => t.onclick = () => { S.spSumber = t.dataset.sumber; reload(); });
+  m.querySelectorAll('[data-rekap]').forEach(b => b.onclick = () => download(`/api/spj/rekap/dok?tahun=${T}&sumber=${S.spSumber}&format=${b.dataset.rekap}`, `Rekap_SPJ_${S.spSumber}_${T}.${b.dataset.rekap}`));
+  m.querySelectorAll('[data-buat]').forEach(b => b.onclick = async () => { try { const r = await api(`/api/spj/spd/${b.dataset.buat}`, { method: 'POST' }); S.spTab = 'spj'; await bukaSpj(r.id, reload); } catch (x) { toast(x.message, 1); } });
+  m.querySelectorAll('[data-spj]').forEach(b => b.onclick = () => bukaSpj(Number(b.dataset.spj), reload).catch(x => toast(x.message, 1)));
+  if ($('#spUmum')) $('#spUmum').onclick = async () => {
+    const rg = await api(`/api/spj/ringkasan?tahun=${T}&sumber=${S.spSumber}`);
+    const opsi = rg.menu.flatMap(mn => mn.rincian.flatMap(ri => ri.baris.map(b => `<option value="${b.baris_id}">${esc(mn.no)} · ${esc(ri.nama)} · ${esc(b.uraian)} (sisa ${rp(b.sisa)})</option>`)));
+    dialog('Belanja non-perjalanan — ' + S.spSumber, `<label>Baris RAB<select name="baris_id" required>${opsi.join('')}</select></label>
+      <label>Uraian<input name="uraian" required minlength="3"></label><div class="grid2"><label>Tanggal<input name="tanggal" type="date" value="${new Date().toISOString().slice(0, 10)}" required></label><label>Jumlah (Rp)<input name="jumlah" type="number" min="1" required></label></div>
+      <div class="grid2"><label>Penerima / toko<input name="penerima"></label><label>No. bukti (nota/kuitansi)<input name="bukti"></label></div>`,
+      async d => { const r = await api('/api/spj', { method: 'POST', body: d }); toast('SPJ dibuat (Draft).'); await reload(); await bukaSpj(r.id, reload); });
+  };
+}
+async function bukaSpj(id, reload) {
+  const x = await api('/api/spj/' + id), umum = x.jenis === 'UMUM';
+  const edit = x.bisa_ubah;
+  const dok = f => `<a class="btn small" href="/api/spj/${id}/dok" target="_blank">PDF</a> <button type="button" class="btn small" data-dl="docx">DOCX</button>`;
+  const rinci = x.rincian.map((r, i) => umum ? '' : `<tr><td>${esc(r.uraian)}<br><span class="muted" style="font-size:.8em">${r.volume} ${esc(r.satuan)} × ${rp(r.tarif)}</span></td><td class="num">${rp(r.rencana)}</td>
+     <td>${edit ? `<input data-j="${i}" type="number" min="0" max="${r.rencana}" value="${r.jumlah}" style="width:120px">` : rp(r.jumlah)}</td><td>${edit ? `<input data-b="${i}" value="${esc(r.bukti || '')}" placeholder="No. bukti / ket.">` : esc(r.bukti || '')}</td></tr>`).join('');
+  dialog(`SPJ #${x.id} — ${x.status}`, `<div class="kvl"><b>Dana</b><span>${x.dana} · ${esc(x.kode_rekening || '')}</span><b>Penerima</b><span>${esc(x.pegawai_nama || x.penerima || '-')}</span>
+     <b>Uraian</b><span>${esc(x.uraian)}</span>${x.st_nomor ? `<b>ST</b><span>${esc(x.st_srikandi || x.st_nomor)}</span>` : ''}
+     ${x.no_bukti ? `<b>Bukti bayar</b><span>${esc(x.no_bukti)} · ${tglID(x.tanggal_bayar)}</span>` : ''}${x.alasan_kembali ? `<b>Dikembalikan</b><span class="err">${esc(x.alasan_kembali)}</span>` : ''}</div>
+    ${umum ? (edit ? `<label>Uraian<input name="uraian" value="${esc(x.uraian)}"></label><div class="grid2"><label>Tanggal<input name="tanggal" type="date" value="${x.tanggal}"></label><label>Jumlah<input name="jumlah" type="number" min="1" value="${x.total}"></label></div><div class="grid2"><label>Penerima<input name="penerima" value="${esc(x.penerima || '')}"></label><label>No. bukti<input name="bukti" value="${esc(x.rincian[0]?.bukti || '')}"></label></div>` : `<p><b>${rp(x.total)}</b> · bukti: ${esc(x.rincian[0]?.bukti || '-')}</p>`)
+      : `${edit ? `<div class="grid2"><label>Berangkat<input name="mulai" type="date" value="${x.mulai}"></label><label>Kembali<input name="selesai" type="date" value="${x.selesai}"></label></div>` : `<p>Pelaksanaan: ${tglID(x.mulai)} – ${tglID(x.selesai)}</p>`}
+      <div class="tbl-wrap"><table><thead><tr><th>Komponen</th><th>Tarif SPD</th><th>Realisasi</th><th>Bukti</th></tr></thead><tbody>${rinci}</tbody><tfoot><tr><td><b>Total</b></td><td class="num">${rp(x.total_rencana)}</td><td colspan="2"><b>${rp(x.total)}</b></td></tr></tfoot></table></div>
+      ${edit ? '<p class="muted" style="font-size:.85em">Realisasi tidak boleh melebihi tarif SPD (Perbup). Kosongkan/ turunkan komponen yang tidak dipakai.</p>' : ''}`}
+    ${edit ? `<label>Catatan<input name="catatan" value="${esc(x.catatan || '')}"></label>` : ''}
+    <div class="acts" style="margin-top:10px">${dok()}</div>
+    <div class="acts" style="margin-top:10px;border-top:1px solid var(--line);padding-top:10px">
+     ${edit ? '<button type="button" class="btn small" data-a="simpan">Simpan perubahan</button><button type="button" class="btn small primary" data-a="Diajukan">Simpan &amp; ajukan</button>' : ''}
+     ${x.bisa_verifikasi ? '<button type="button" class="btn small primary" data-a="Diverifikasi">Verifikasi</button><button type="button" class="btn small danger" data-a="Dikembalikan">Kembalikan</button>' : ''}
+     ${x.bisa_bayar ? '<button type="button" class="btn small primary" data-a="Dibayar">Catat pembayaran</button><button type="button" class="btn small danger" data-a="Dikembalikan">Kembalikan</button>' : ''}
+     ${x.bisa_koreksi ? '<button type="button" class="btn small danger" data-a="koreksi">Koreksi pembayaran (Kepala)</button>' : ''}
+     ${edit ? '<button type="button" class="btn small danger" data-a="hapus">Hapus</button>' : ''}</div>`, null);
+  const f = $('#dlgForm');
+  const kumpul = () => {
+    const g = n => f.elements[n]?.value;
+    if (umum) return { uraian: g('uraian'), tanggal: g('tanggal'), jumlah: g('jumlah'), penerima: g('penerima'), bukti: g('bukti'), catatan: g('catatan') };
+    return { mulai: g('mulai'), selesai: g('selesai'), catatan: g('catatan'), rincian: x.rincian.map((_, i) => ({ jumlah: f.querySelector(`[data-j="${i}"]`).value, bukti: f.querySelector(`[data-b="${i}"]`).value })) };
+  };
+  f.onclick = async e => {
+    const b = e.target.closest('[data-a],[data-dl]'); if (!b) return;
+    if (b.dataset.dl) return download(`/api/spj/${id}/dok?format=docx`, `SPJ_${id}.docx`);
+    const a = b.dataset.a, tutup = async () => { $('#dlg').close(); await reload(); };
+    try {
+      if (a === 'simpan') { await api('/api/spj/' + id, { method: 'PUT', body: kumpul() }); toast('Tersimpan.'); await tutup(); }
+      else if (a === 'Diajukan') { await api('/api/spj/' + id, { method: 'PUT', body: kumpul() }); await api(`/api/spj/${id}/status`, { method: 'POST', body: { ke: 'Diajukan' } }); toast('SPJ diajukan.'); await tutup(); }
+      else if (a === 'Diverifikasi') { await api(`/api/spj/${id}/status`, { method: 'POST', body: { ke: a } }); toast('SPJ diverifikasi.'); await tutup(); }
+      else if (a === 'hapus') { if (confirm('Hapus SPJ ini?')) { await api('/api/spj/' + id, { method: 'DELETE' }); toast('Dihapus.'); await tutup(); } }
+      else {
+        $('#dlg').close();
+        const judul = { Dikembalikan: 'Kembalikan SPJ', Dibayar: 'Catat pembayaran', koreksi: 'Koreksi pembayaran' }[a];
+        const isiF = a === 'Dibayar' ? `<div class="grid2"><label>Tanggal bayar<input name="tanggal_bayar" type="date" value="${new Date().toISOString().slice(0, 10)}" required></label><label>No. bukti (kosong = otomatis)<input name="no_bukti"></label></div><p>Total <b>${rp(x.total)}</b></p>` : '<label>Alasan<input name="alasan" required minlength="5"></label>';
+        dialog(judul, isiF, async d => { await api(a === 'koreksi' ? `/api/spj/${id}/koreksi` : `/api/spj/${id}/status`, { method: 'POST', body: a === 'koreksi' ? d : { ke: a, ...d } }); toast('Berhasil.'); await reload(); });
+      }
+    } catch (er) { toast(er.message, 1); }
+  };
 }
 
 // ---------- Penomoran Surat ----------

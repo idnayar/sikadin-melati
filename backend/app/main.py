@@ -7,7 +7,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import bok, jadwal, master, penomoran, rencana, surat
+from . import bok, jadwal, master, penomoran, rencana, spj, surat
 from .calc import hitung
 from .core import Gagal, get_db, perlu_baca
 from .db import init_db
@@ -32,6 +32,7 @@ app.include_router(rencana.router)
 app.include_router(jadwal.router)
 app.include_router(surat.router)
 app.include_router(penomoran.router)
+app.include_router(spj.router)
 
 
 @app.post("/api/hitung-biaya")

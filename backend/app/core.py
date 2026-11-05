@@ -109,6 +109,10 @@ def audit(db, user: dict, tabel: str, rid, aksi: str, lama=None, baru=None, sumb
 
 def pesan_db(e: Exception) -> str:
     m = str(e)
+    if "SPJ_TERKUNCI" in m:
+        return "SPJ yang sudah dibayar terkunci."
+    if "SPJ_TIDAK_BOLEH_DIHAPUS" in m:
+        return "SPJ yang sudah diajukan tidak boleh dihapus."
     if "UNIQUE" in m:
         return "Data dengan nilai kunci yang sama sudah ada (duplikat)."
     if "FOREIGN KEY" in m:

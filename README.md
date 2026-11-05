@@ -78,6 +78,15 @@ Dibuat dari **jadwal yang sudah disetujui** (menu Surat Tugas & SPD). Satu ST + 
 - Dokumen PDF lain: rincian biaya, kuitansi, daftar hadir, daftar pengeluaran riil, surat pernyataan pembatalan & pengembalian biaya.
 - Petugas melihat ST/SPD/rincian miliknya sendiri; dokumen BLUD mengikuti batas akses BLUD.
 
+## Realisasi & SPJ (Tahap 5, tanpa panjar)
+- Alur: **Draft → Diajukan → Diverifikasi → Dibayar** (atau *Dikembalikan* dengan alasan). Pembayaran dicatat setelah SPJ diverifikasi; hanya SPJ *Dibayar* dihitung sebagai realisasi.
+- **SPJ perjalanan dinas** lahir dari SPD pada ST yang terbit (satu per petugas). Realisasi per komponen tidak boleh melebihi tarif SPD (Perbup); boleh lebih rendah. Pengajuan baru boleh setelah kegiatan selesai (pengaturan `spj_setelah_selesai`) dan perlu nomor bukti.
+- **Belanja non-perjalanan** (jenis UMUM) dicatat per baris RAB oleh Kepala/Bendahara/Pengelola Program.
+- Total dibayar per baris RAB tidak boleh melebihi pagu baris. Nomor bukti otomatis `BP/{SUMBER}/{tahun}/{urut}`.
+- SPJ Dibayar terkunci (juga di database); hanya Kepala dapat mengoreksi pembayaran (alasan wajib, tercatat di audit).
+- Petugas hanya melihat/mengisi SPJ miliknya. BLUD hanya Kepala + Bendahara BLUD. Menu **Realisasi & SPJ** memuat tab Realisasi anggaran (pagu, proses, realisasi, sisa, serapan per menu/rincian/baris).
+- Ekspor: bukti SPJ (PDF/DOCX), rekap SPJ dibayar per sumber/bulan (PDF/DOCX/XLSX).
+
 ## Penomoran surat
 Pola mengikuti contoh Srikandi: `klasifikasi/yymm-urut/unit/bulan-romawi/tahun`, mis. `000.1.2.3/2611-001/PKM.MELATI.BOK/XI/2026`.
 Klasifikasi arsip: Permendagri 83/2022 (000.1.2.3 = Perjalanan Dinas Pegawai; 000 = Umum); tata naskah: Permendagri 1/2023.

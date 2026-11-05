@@ -160,6 +160,30 @@ CREATE TRIGGER IF NOT EXISTS trg_spd_nodel BEFORE DELETE ON spd BEGIN SELECT RAI
 """
 
 
+SCHEMA_SPJ = """
+-- Tahap 5: realisasi & SPJ (tanpa panjar; dibayar setelah SPJ diverifikasi). jenis SPD = perjalanan dinas (1 SPJ per petugas per SPD);
+-- jenis UMUM = belanja lain pada baris RAB. Hanya SPJ berstatus Dibayar yang dihitung sebagai realisasi.
+CREATE TABLE IF NOT EXISTS spj(
+  id INTEGER PRIMARY KEY, jenis TEXT NOT NULL CHECK(jenis IN ('SPD','UMUM')), tahun INTEGER NOT NULL,
+  sumber_dana_id INTEGER NOT NULL REFERENCES sumber_dana(id), baris_id INTEGER NOT NULL REFERENCES bok_baris(id),
+  spd_id INTEGER UNIQUE REFERENCES spd(id), st_id INTEGER REFERENCES surat_tugas(id), pegawai_id INTEGER REFERENCES pegawai(id),
+  tanggal TEXT NOT NULL, mulai TEXT, selesai TEXT, uraian TEXT NOT NULL, penerima TEXT,
+  rincian_json TEXT NOT NULL DEFAULT '[]', total_rencana INTEGER NOT NULL DEFAULT 0, total INTEGER NOT NULL DEFAULT 0 CHECK(total >= 0),
+  status TEXT NOT NULL DEFAULT 'Draft' CHECK(status IN ('Draft','Diajukan','Dikembalikan','Diverifikasi','Dibayar')),
+  no_bukti TEXT, tanggal_bayar TEXT, catatan TEXT, alasan_kembali TEXT,
+  dibuat_oleh TEXT, dibuat_pada TEXT DEFAULT (datetime('now','localtime')), diajukan_pada TEXT,
+  diverifikasi_oleh TEXT, diverifikasi_pada TEXT, dibayar_oleh TEXT, dibayar_pada TEXT);
+CREATE INDEX IF NOT EXISTS ix_spj_baris ON spj(baris_id, status);
+CREATE INDEX IF NOT EXISTS ix_spj_sumber ON spj(tahun, sumber_dana_id, status);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_spj_bukti ON spj(sumber_dana_id, tahun, no_bukti) WHERE no_bukti IS NOT NULL;
+-- SPJ yang sudah Dibayar tidak dapat diubah isinya (hanya status yang boleh dikoreksi Kepala lewat API) dan tidak dapat dihapus
+CREATE TRIGGER IF NOT EXISTS trg_spj_kunci BEFORE UPDATE ON spj
+WHEN OLD.status='Dibayar' AND NEW.status='Dibayar' BEGIN SELECT RAISE(ABORT, 'SPJ_TERKUNCI'); END;
+CREATE TRIGGER IF NOT EXISTS trg_spj_nodel BEFORE DELETE ON spj WHEN OLD.status NOT IN ('Draft','Dikembalikan')
+BEGIN SELECT RAISE(ABORT, 'SPJ_TIDAK_BOLEH_DIHAPUS'); END;
+"""
+
+
 JENIS_NOMOR_AWAL = [
     ("ST-BOK", "Surat Tugas & SPD — BOK", "000.1.2.3", "PKM.MELATI.BOK", "000.1.2.3 = Perjalanan Dinas Pegawai (Permendagri 83/2022). Seri nomor khusus BOK."),
     ("ST-DAU", "Surat Tugas & SPD — DAU", "000.1.2.3", "PKM.MELATI.DAU", "Seri nomor khusus DAU."),
@@ -169,6 +193,7 @@ JENIS_NOMOR_AWAL = [
 
 # Pengaturan yang ditambahkan setelah rilis awal (ditambahkan otomatis ke database lama)
 PENGATURAN_BARU = [
+    ("spj_setelah_selesai", "1", "1 = SPJ perjalanan dinas baru boleh diajukan setelah tanggal selesai kegiatan; 0 = boleh kapan saja"),
     ("batas_persen_ruangan", "50", "Maks. % pegawai satu ruangan yang boleh meninggalkan ruangan (dinas luar/cuti) pada hari yang sama"),
     ("ruangan_hitung_cuti", "1", "1 = pegawai cuti dihitung sebagai tidak berada di ruangan; 0 = hanya dinas luar yang dihitung"),
     ("format_nomor_spd", "{no}/SPD/PKM-MLT/{bulan_romawi}/{tahun}", "Format nomor Surat Perjalanan Dinas"),
@@ -247,6 +272,7 @@ def hitung_tingkat(eselon, golongan, status) -> str:
 def init_db() -> None:
     con = connect()
     con.executescript(SCHEMA)
+    con.executescript(SCHEMA_SPJ)
     # Migrasi database lama: pagu & menu RAB kini per sumber dana (data lama = BOK)
     bok = (con.execute("SELECT id FROM sumber_dana WHERE kode='BOK'").fetchone() or {}).get("id")
     if "sumber_dana_id" not in {r["name"] for r in con.execute("PRAGMA table_info(bok_pagu)").fetchall()}:

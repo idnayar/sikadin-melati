@@ -154,3 +154,6 @@ dialog:has(#gen),dialog:has(#gAll){width:min(900px,96vw)}
 .bar-meter{height:8px;background:var(--line);border-radius:99px;overflow:hidden}.bar-meter i{display:block;height:100%;background:var(--primary)}.bar-meter i.bad{background:var(--err)}
 tr.batal td{opacity:.6}tr.batal td:first-child b{text-decoration:line-through}
 code{background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:0 4px;font-size:.85em}
+.persen{height:8px;min-width:70px;background:var(--bg);border:1px solid var(--line);border-radius:99px;overflow:hidden}.persen i{display:block;height:100%;background:var(--g600,#16a34a)}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:10px 0}.cards .card{padding:10px}.cards small{display:block;color:var(--muted,#64748b)}.cards b{font-size:1.1em}
+tr.grp td{background:var(--bg);border-top:2px solid var(--line)}td.num{text-align:right;white-space:nowrap}
