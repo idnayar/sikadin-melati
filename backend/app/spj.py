@@ -128,7 +128,7 @@ def belum(tahun: int, user=Depends(auth), db=Depends(get_db)):
     rows = db.execute("""SELECT d.id spd_id, d.total, d.pegawai_id, p.nama pegawai, st.id st_id, st.nomor, st.maksud, sd.kode dana, j.mulai, j.selesai, l.nama lokasi
         FROM spd d JOIN surat_tugas st ON st.id=d.st_id AND st.status='Terbit' JOIN jadwal j ON j.id=st.jadwal_id JOIN pegawai p ON p.id=d.pegawai_id
         JOIN sumber_dana sd ON sd.id=st.sumber_dana_id JOIN lokasi l ON l.id=j.lokasi_id
-        WHERE st.tahun=? AND NOT EXISTS(SELECT 1 FROM spj s WHERE s.spd_id=d.id) ORDER BY j.mulai, st.id, p.nama""", (tahun,)).fetchall()
+        WHERE j.tahun=? AND NOT EXISTS(SELECT 1 FROM spj s WHERE s.spd_id=d.id) ORDER BY j.mulai, st.id, p.nama""", (tahun,)).fetchall()
     out = []
     for r in rows:
         if user["role"] != "pegawai" and akses_sumber(user, r["dana"], "rencana"):

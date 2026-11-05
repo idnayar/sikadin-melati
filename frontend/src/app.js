@@ -51,6 +51,7 @@ function dialog(judul, bodyHtml, onSave, saveLabel = 'Simpan') {
 
 // ---------- navigasi ----------
 const MENU = [
+  ['Beranda', [['dashboard', 'Dashboard']]],
   ['Anggaran', [['bok', 'Pagu Anggaran BOK'], ['dau', 'Pagu Anggaran DAU'], ['blud', 'Pagu Anggaran BLUD'], ['rencana', 'Perencanaan (RPK/POA)']]],
   ['Dinas Luar', [['jadwal', 'Jadwal Dinas Luar'], ['st', 'Surat (ST, SPD & Nomor)'], ['rekap', 'Rekap Perjalanan Dinas']]],
   ['Keuangan', [['spj', 'Realisasi & SPJ'], ['akun', 'Akuntansi & Laporan Keuangan']]],
@@ -61,20 +62,21 @@ const MENU = [
 function buildNav() {
   let h = '';
   for (const [g, items] of MENU) {
-    const vis = items.filter(([k]) => S.meta[k] || (['kalkulator', 'data', 'rencana', 'jadwal', 'nomor'].includes(k) && S.bisaBaca) || k === 'st' || k === 'spj' || k === 'rekap' || (k === 'akun' && S.akuntansi) || (['bok', 'dau', 'blud'].includes(k) && S.akses[k.toUpperCase()].baca) || (k === 'riwayat' && (S.bisaTulis || S.user.role === 'bendahara_blud')));
+    const vis = items.filter(([k]) => S.meta[k] || (['kalkulator', 'data', 'rencana', 'jadwal', 'nomor'].includes(k) && S.bisaBaca) || k === 'dashboard' || k === 'st' || k === 'spj' || k === 'rekap' || (k === 'akun' && S.akuntansi) || (['bok', 'dau', 'blud'].includes(k) && S.akses[k.toUpperCase()].baca) || (k === 'riwayat' && (S.bisaTulis || S.user.role === 'bendahara_blud')));
     if (!vis.length) continue;
     h += `<h4>${g}</h4>` + vis.map(([k, l]) => `<a data-k="${k}">${l}</a>`).join('');
   }
-  if (!S.bisaBaca) h = '<h4>Dinas Luar</h4><a data-k="st">Surat Tugas &amp; SPD Saya</a><a data-k="rekap">Rekap Perjalanan Saya</a><h4>Keuangan</h4><a data-k="spj">SPJ Saya</a>';
+  if (!S.bisaBaca) h = '<h4>Beranda</h4><a data-k="dashboard">Dashboard</a><h4>Dinas Luar</h4><a data-k="st">Surat Tugas &amp; SPD Saya</a><a data-k="rekap">Rekap Perjalanan Saya</a><h4>Keuangan</h4><a data-k="spj">SPJ Saya</a>';
   $('#nav').innerHTML = h;
   $('#nav').onclick = e => { const k = e.target.dataset.k; if (k) { location.hash = k; $('#nav').classList.remove('open'); } };
 }
 async function route() {
-  const k = location.hash.slice(1) || (S.bisaBaca ? 'bok' : 'st');
+  const k = location.hash.slice(1) || 'dashboard';
   document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('on', a.dataset.k === k));
   const m = $('#main');
   try {
-    if (k === 'st') await viewSurat(m);
+    if (k === 'dashboard') await viewDashboard(m);
+    else if (k === 'st') await viewSurat(m);
     else if (k === 'spj') await viewSpj(m);
     else if (k === 'rekap') await viewRekap(m);
     else if (k === 'akun' && S.akuntansi) await viewAkun(m);
@@ -599,6 +601,38 @@ async function viewJadwal(m) {
       } catch (x) { toast(x.message, 1); }
     };
   }
+}
+
+// ---------- Dashboard ----------
+const PERAN_TXT = { kepala: 'Kepala Puskesmas', bendahara: 'Bendahara', bendahara_blud: 'Bendahara BLUD', program: 'Pengelola Program', pegawai: 'Pegawai' };
+async function viewDashboard(m) {
+  const T = S.bokTahun, D = await api('/api/dashboard?tahun=' + T);
+  const sal = `<h2>Dashboard</h2><p class="muted">Selamat datang, <b>${esc(S.user.nama)}</b> · ${PERAN_TXT[S.user.role] || ''} · tahun anggaran <input id="dbTh" type="number" value="${T}" style="width:80px"></p>`;
+  if (D.peran === 'pegawai') {
+    m.innerHTML = sal + `<div class="cards"><div class="card"><small>Perjalanan dinas tahun ini</small><b>${D.total.perjalanan}</b></div><div class="card"><small>Total hari</small><b>${D.total.hari}</b></div><div class="card"><small>Total biaya SPD</small><b>${rp(D.total.biaya)}</b></div></div>
+     ${D.perlu_tindakan.length ? `<div class="card" style="border-color:#fcd34d"><b>SPJ yang perlu Anda lengkapi</b>${D.perlu_tindakan.map(x => `<p style="margin:6px 0">${tglID(x.mulai)} · ${esc(x.maksud)} <span class="badge ${SP_BADGE[x.spj_status]}">${x.spj_status}</span> <a class="btn small" href="#spj">Buka SPJ</a></p>`).join('')}</div>` : ''}
+     <div class="card"><b>Perjalanan dinas mendatang</b>${D.perjalanan.map(x => `<p style="margin:6px 0">${tglID(x.mulai)}${x.selesai !== x.mulai ? ' – ' + tglID(x.selesai) : ''} · ${esc(x.tempat)} · ${esc(x.maksud)} <span class="muted">(${rp(x.total)})</span></p>`).join('') || '<p class="muted">Belum ada jadwal mendatang.</p>'}</div>
+     <div class="card"><b>Status SPJ saya</b><p>${Object.entries(D.spj).map(([k, v]) => `<span class="badge ${SP_BADGE[k] || ''}">${k}: ${v}</span>`).join(' ') || '<span class="muted">Belum ada.</span>'}</p></div>`;
+    $('#dbTh').onchange = e => { S.bokTahun = Number(e.target.value) || T; viewDashboard(m); };
+    return;
+  }
+  const t = D.total, mx = Math.max(1, ...D.bulanan.rencana, ...D.bulanan.realisasi);
+  const warna = p => p >= 90 ? '#dc2626' : p >= 60 ? '#d97706' : '#16a34a';
+  const k = D.keuangan;
+  m.innerHTML = sal + `
+   <div class="cards"><div class="card"><small>Pagu ${D.sumber.join(' + ')}</small><b>${rp(t.pagu)}</b></div><div class="card"><small>Realisasi (dibayar)</small><b>${rp(t.realisasi)}</b></div><div class="card"><small>Dalam proses SPJ</small><b>${rp(t.proses)}</b></div><div class="card"><small>Sisa pagu</small><b>${rp(t.sisa)}</b></div><div class="card"><small>Serapan</small><b style="color:${warna(t.persen)}">${t.persen}%</b></div>
+    <div class="card"><small>Perjalanan dinas ${T}</small><b>${D.dinas.st} ST · ${D.dinas.orang} orang</b></div></div>
+   ${D.tugas.length ? `<div class="card" style="border-color:#fcd34d"><b>Perlu tindakan</b><div class="acts" style="margin-top:6px">${D.tugas.map(x => `<a class="btn" href="#${x.tujuan}">${esc(x.label)} <span class="badge">${x.n}</span></a>`).join('')}</div></div>` : '<div class="card" style="border-color:#86efac">✔ Tidak ada pekerjaan yang menunggu.</div>'}
+   ${D.peringatan.length ? `<div class="card"><b>Peringatan</b>${D.peringatan.map(x => `<p style="margin:5px 0;color:${x.level === 'bad' ? '#b91c1c' : x.level === 'warn' ? '#b45309' : 'inherit'}">${x.level === 'bad' ? '⛔' : x.level === 'warn' ? '⚠' : 'ℹ'} ${esc(x.teks)}</p>`).join('')}</div>` : ''}
+   <div class="card"><b>Serapan per sumber dana</b><div class="tbl-wrap"><table><thead><tr><th>Sumber</th><th>Pagu</th><th>Rencana disetujui</th><th>Proses</th><th>Realisasi</th><th>Sisa</th><th style="min-width:120px">Serapan</th></tr></thead><tbody>
+    ${D.serapan.map(x => `<tr><td><b>${x.sumber}</b></td><td class="num">${rp(x.pagu)}</td><td class="num">${rp(x.rencana)}</td><td class="num">${rp(x.proses)}</td><td class="num">${rp(x.realisasi)}</td><td class="num">${rp(x.sisa)}</td><td><div class="persen"><i style="width:${Math.min(100, x.persen)}%;background:${warna(x.persen)}"></i></div>${x.persen}%</td></tr>`).join('')}</tbody></table></div></div>
+   <div class="card"><b>Rencana vs realisasi per bulan</b> <span class="muted" style="font-size:.85em">(<i style="display:inline-block;width:10px;height:10px;background:#bbf7d0"></i> rencana disetujui · <i style="display:inline-block;width:10px;height:10px;background:#15803d"></i> realisasi dibayar)</span>
+    <div style="display:flex;gap:6px;align-items:flex-end;height:150px;margin-top:8px">${D.bulanan.rencana.map((r, i) => `<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%" title="${BLN[i]} — rencana ${rp(r)}, realisasi ${rp(D.bulanan.realisasi[i])}">
+      <div style="display:flex;gap:2px;align-items:flex-end;height:120px;width:100%;justify-content:center"><div style="width:42%;background:#bbf7d0;height:${Math.round(100 * r / mx)}%"></div><div style="width:42%;background:#15803d;height:${Math.round(100 * D.bulanan.realisasi[i] / mx)}%"></div></div><small class="muted">${BLN[i].slice(0, 3)}</small></div>`).join('')}</div></div>
+   <div class="card"><b>Jadwal dinas luar 14 hari ke depan</b>${D.jadwal_dekat.length ? `<div class="tbl-wrap"><table><thead><tr><th>Tanggal</th><th>Kegiatan</th><th>Tempat</th><th>Petugas</th><th>Dana</th><th>Status</th></tr></thead><tbody>${D.jadwal_dekat.map(j => `<tr><td style="white-space:nowrap">${tglID(j.mulai)}${j.selesai !== j.mulai ? ' – ' + tglID(j.selesai) : ''}</td><td>${esc(j.kegiatan)}</td><td>${esc(j.lokasi)}</td><td>${j.petugas} orang</td><td>${j.dana}</td><td><span class="badge ${j.punya_st ? 'st-Disetujui' : 'st-Diajukan'}">${j.punya_st ? 'ST terbit' : j.status}</span></td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">Tidak ada jadwal dalam 14 hari ke depan.</p>'}</div>
+   ${k ? `<div class="card"><b>Ringkasan keuangan (s.d. ${BLN[k.bulan - 1]} ${T}, semua sumber)</b><div class="cards"><div class="card"><small>Pendapatan (LRA)</small><b>${rp(k.pendapatan)}</b></div><div class="card"><small>Belanja (LRA)</small><b>${rp(k.belanja)}</b></div><div class="card"><small>Surplus/(defisit) LRA</small><b>${rp(k.surplus_lra)}</b></div><div class="card"><small>Surplus/(defisit) LO</small><b>${rp(k.surplus_lo)}</b></div><div class="card"><small>Saldo kas</small><b>${rp(k.kas)}</b></div><div class="card"><small>Total aset</small><b>${rp(k.aset)}</b></div></div>
+     <p class="muted" style="margin:0">${k.seimbang ? '✔ Neraca seimbang.' : '⚠ Neraca belum seimbang — periksa saldo awal/jurnal.'} <a href="#akun">Buka laporan keuangan →</a></p></div>` : ''}`;
+  $('#dbTh').onchange = e => { S.bokTahun = Number(e.target.value) || T; viewDashboard(m); };
 }
 
 // ---------- Rekap Perjalanan Dinas ----------

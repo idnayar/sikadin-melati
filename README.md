@@ -95,6 +95,9 @@ Dibuat dari **jadwal yang sudah disetujui** (menu Surat Tugas & SPD). Satu ST + 
 ## Rekap perjalanan dinas
 Menu *Rekap Perjalanan Dinas*: per nama, tempat, waktu, tujuan, biaya (SPD) dan realisasi (SPJ dibayar) — setahun & per bulan; filter bulan/sumber/pegawai/tempat/teks; ekspor PDF/DOCX/XLSX. Pegawai hanya melihat miliknya; BLUD tetap terbatas.
 
+## Dashboard (Tahap 7)
+Beranda per peran (`/api/dashboard`): kartu pagu/realisasi/proses/sisa/serapan, daftar **pekerjaan yang menunggu** (rencana & jadwal belum disetujui, jadwal siap ST, ST belum bernomor Srikandi, SPJ untuk dilengkapi/diverifikasi/dibayar — tiap tombol langsung membuka menunya), peringatan (baris RAB ≥ 90% atau melebihi pagu, pegawai melebihi batas hari dinas, serapan jauh di bawah target), serapan per sumber, grafik rencana vs realisasi per bulan, jadwal 14 hari ke depan, ringkasan keuangan (hanya Kepala + Bendahara BLUD). Pegawai melihat perjalanan mendatang dan status SPJ miliknya. Semua angka mengikuti hak akses sumber dana (BLUD terisolasi). Tahun ST/SPJ mengikuti **tahun anggaran jadwal**, bukan tahun tanggal surat.
+
 ## Akuntansi & Laporan Keuangan (Tahap 6, PSAP 13)
 - Buku besar satu kesatuan (DAU, BOK, BLUD): bagan akun, jurnal (KAS/AKRUAL/AWAL), saldo awal, anggaran pendapatan. **Hanya Kepala + Bendahara BLUD.**
 - SPJ dibayar otomatis menjadi jurnal kas (Dr belanja / Cr kas); koreksi pembayaran membuat jurnal balik. Penerimaan pendapatan dicatat lewat menu (Dr kas / Cr pendapatan).

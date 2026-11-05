@@ -8,7 +8,7 @@ from .core import Gagal, audit
 
 def buat_spj_dari_spd(db, user, spd_id: int):
     """Idempoten: mengembalikan id SPJ (baru atau yang sudah ada); None bila ST sudah dibatalkan."""
-    d = db.execute("""SELECT d.*, st.status st_status, st.sumber_dana_id, st.tahun, st.nomor, j.baris_id, j.mulai, j.selesai, j.kegiatan, p.nama pegawai, sd.kode dana
+    d = db.execute("""SELECT d.*, st.status st_status, st.sumber_dana_id, j.tahun, st.nomor, j.baris_id, j.mulai, j.selesai, j.kegiatan, p.nama pegawai, sd.kode dana
         FROM spd d JOIN surat_tugas st ON st.id=d.st_id JOIN jadwal j ON j.id=st.jadwal_id JOIN pegawai p ON p.id=d.pegawai_id JOIN sumber_dana sd ON sd.id=st.sumber_dana_id
         WHERE d.id=?""", (spd_id,)).fetchone()
     if not d or d["st_status"] != "Terbit":

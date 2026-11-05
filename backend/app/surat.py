@@ -193,7 +193,7 @@ def terbit_massal(body: dict = Body(default={}), user=Depends(perlu_baca), db=De
 
 @router.get("")
 def daftar(tahun: int, status: str | None = None, user=Depends(auth), db=Depends(get_db)):
-    q, a = ["s.tahun=?"], [tahun]
+    q, a = ["j.tahun=?"], [tahun]
     if status:
         q.append("s.status=?")
         a.append(status)
