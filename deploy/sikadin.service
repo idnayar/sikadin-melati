@@ -1,0 +1,18 @@
+# /etc/systemd/system/sikadin.service  — lalu: systemctl daemon-reload && systemctl enable --now sikadin
+# Asumsi: kode di /opt/sikadin (backend/ dan frontend/dist sudah ada), venv di /opt/sikadin/backend/.venv, data di /var/lib/sikadin.
+[Unit]
+Description=SIKADIN - Puskesmas Melati
+After=network.target
+
+[Service]
+User=sikadin
+WorkingDirectory=/opt/sikadin/backend
+Environment=SIKADIN_ENV=production
+Environment=SIKADIN_DB=/var/lib/sikadin/sikadin.db
+Environment=SIKADIN_DIST=/opt/sikadin/frontend/dist
+ExecStart=/opt/sikadin/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --proxy-headers --forwarded-allow-ips=127.0.0.1
+Restart=on-failure
+# Satu proses saja (sesi login di memori). Jangan tambah --workers.
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,22 @@
+# Jalankan dari folder deploy:  docker compose up -d --build
+# Prasyarat: DNS sikadin.pkmmelati.com (record A) mengarah ke IP server, port 80/443 terbuka. Caddy mengurus sertifikat HTTPS otomatis.
+services:
+  sikadin:
+    build: ..
+    restart: unless-stopped
+    volumes:
+      - sikadin-data:/data
+    environment:
+      SIKADIN_ENV: production
+    expose: ["8000"]
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    depends_on: [sikadin]
+volumes:
+  sikadin-data:
+  caddy-data:

@@ -9,11 +9,44 @@ from fastapi.staticfiles import StaticFiles
 
 from . import akuntansi, dashboard, laporan, rekap, bok, jadwal, master, penomoran, rencana, spj, surat
 from .calc import hitung
+from . import core
 from .core import Gagal, get_db, perlu_baca
 from .db import init_db
 
 app = FastAPI(title="SIKADIN API", docs_url="/api/docs" if os.environ.get("SIKADIN_DOCS") else None, redoc_url=None, openapi_url="/api/openapi.json" if os.environ.get("SIKADIN_DOCS") else None)
 init_db()
+
+# Mode produksi (SIKADIN_ENV=production): cookie sesi hanya lewat HTTPS dan server menolak jalan bila masih ada akun bersandi demo.
+if core.produksi() and not os.environ.get("SIKADIN_IZINKAN_SANDI_DEMO"):
+    from .admin import akun_sandi_demo
+    _c = core.connect()
+    _sisa = akun_sandi_demo(_c)
+    _c.close()
+    if _sisa:
+        raise RuntimeError("Akun masih memakai sandi demo: " + ", ".join(_sisa) + ". Jalankan «python -m app.admin sandi-acak» (atau atur-sandi USERNAME) lalu mulai ulang.")
+
+
+@app.middleware("http")
+async def _header_keamanan(request, call_next):
+    r = await call_next(request)
+    r.headers.setdefault("X-Content-Type-Options", "nosniff")
+    r.headers.setdefault("X-Frame-Options", "DENY")
+    r.headers.setdefault("Referrer-Policy", "same-origin")
+    r.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    r.headers.setdefault("Content-Security-Policy", "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'self' blob:; frame-ancestors 'none'")
+    if core.cookie_aman():
+        r.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
+    return r
+
+
+@app.get("/api/health")
+def _health():
+    c = core.connect()
+    try:
+        c.execute("SELECT 1 FROM users LIMIT 1").fetchone()
+    finally:
+        c.close()
+    return {"ok": True}
 
 
 @app.exception_handler(Gagal)

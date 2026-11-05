@@ -113,7 +113,7 @@ def login(request: Request, response: Response, body: dict = Body(default={}), d
     info = {"id": u["id"], "username": u["username"], "nama": u["nama"], "role": u["role"], "pegawai_id": u["pegawai_id"]}
     sid = core.new_session(info)
     response.set_cookie("sid", sid, httponly=True, samesite="strict", max_age=43200, path="/",
-                        secure=os.environ.get("SIKADIN_COOKIE_SECURE") == "1")
+                        secure=core.cookie_aman())
     return info
 
 

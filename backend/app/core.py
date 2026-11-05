@@ -1,11 +1,21 @@
 """Utilitas bersama: koneksi per-permintaan, sesi/login, hak akses, audit, galat."""
 import json
+import os
 import secrets
 import time
 
 from fastapi import Depends, Request
 
 from .db import connect
+
+
+def produksi() -> bool:
+    return os.environ.get("SIKADIN_ENV", "").lower() == "production"
+
+
+def cookie_aman() -> bool:
+    """Cookie sesi hanya lewat HTTPS: otomatis di mode produksi, atau SIKADIN_COOKIE_SECURE=1."""
+    return os.environ.get("SIKADIN_COOKIE_SECURE") == "1" or (produksi() and os.environ.get("SIKADIN_COOKIE_SECURE") != "0")
 
 
 class Gagal(Exception):

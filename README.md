@@ -20,16 +20,10 @@ npm run dev                                          # buka http://localhost:517
 Database `data/sikadin.db` dibuat & diisi data contoh otomatis saat backend pertama jalan
 (hapus folder `data/` untuk mengulang dari awal).
 
-## Produksi (satu alamat, mis. sikadin.pkmmelati.com)
-```
-cd frontend && npm run build        # menghasilkan frontend/dist
-cd ../backend
-set SIKADIN_COOKIE_SECURE=1         # wajib bila lewat HTTPS
-set SIKADIN_ADMIN_PASSWORD=...      # password awal akun (hanya berlaku saat database baru dibuat)
-.venv\Scripts\python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
-```
-FastAPI otomatis menyajikan `frontend/dist`. Pasang di belakang reverse proxy HTTPS (Nginx/Caddy).
-Variabel lain: `SIKADIN_DB` (lokasi file database), `SIKADIN_DIST` (lokasi build frontend).
+## Produksi (sikadin.pkmmelati.com)
+Panduan lengkap: [`deploy/PANDUAN-PENAYANGAN.md`](deploy/PANDUAN-PENAYANGAN.md) (Docker + Caddy, atau systemd; backup harian; tautan landing page).
+Ringkas: `SIKADIN_ENV=production` mewajibkan sandi demo diganti (`python -m app.admin sandi-acak`), mengaktifkan cookie HTTPS & header keamanan.
+Perintah admin: `python -m app.admin cek-sandi-demo | sandi-acak | atur-sandi USER | backup`. Variabel: `SIKADIN_DB`, `SIKADIN_DIST`, `SIKADIN_ENV`, `SIKADIN_ADMIN_PASSWORD` (sandi awal hanya untuk database baru).
 
 ## Akun contoh (GANTI lewat tombol "Ganti password")
 `kepala`, `bendahara`, `program`, `pegawai` — password awal ada di `backend/app/db.py` (bagian akun demo).
@@ -38,8 +32,8 @@ Variabel lain: `SIKADIN_DB` (lokasi file database), `SIKADIN_DIST` (lokasi build
 - [x] 1. Master data & tarif Perbup
 - [x] 2. Pagu & RAB BOK 2027, Perencanaan BOK (RPK/POA)
 - [x] 3. Jadwal dinas luar + anti-doubling (kalender, bagi petugas otomatis, constraint DB)
-- [x] 4. ST/SPD (templat Srikandi) + penomoran  - [ ] 5. Realisasi & SPJ (tanpa panjar — diputuskan pemilik)
-- [ ] 6. Rekap & laporan  - [ ] 7. Dashboard  - [ ] DAU/BLUD
+- [x] 4. ST/SPD (templat Srikandi) + penomoran  - [x] 5. Realisasi & SPJ (tanpa panjar)
+- [x] 6. Rekap perjalanan dinas & laporan keuangan PSAP 13  - [x] 7. Dashboard  - [x] DAU/BLUD per sumber dana
 
 ## Catatan teknis
 - Semua tarif ada di tabel `tarif` (`tahun_berlaku`, `dasar_hukum`); tidak ada angka tarif di kode.

@@ -1,0 +1,5 @@
+# Ganti dengan domain sebenarnya bila berbeda.
+sikadin.pkmmelati.com {
+	encode gzip
+	reverse_proxy sikadin:8000
+}
