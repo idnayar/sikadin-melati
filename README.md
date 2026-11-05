@@ -64,7 +64,7 @@ muncul di kalender sebagai "Kegiatan BLUD (terbatas)" (tanggal, lokasi, petugas 
 Aturan anti-doubling berlaku **lintas sumber dana** (satu pegawai tidak bisa ditugaskan dua kali pada tanggal sama).
 
 **Laporan keuangan tetap satu kesatuan** (semua sumber dana dalam satu laporan, ketujuh komponen PSAP 13). Siapa yang boleh melihat laporan
-gabungan yang memuat angka BLUD perlu diputuskan di Tahap 6.
+gabungan yang memuat angka BLUD: **keputusan pemilik — hanya Kepala Puskesmas dan Bendahara BLUD**; peran lain tidak mengakses laporan gabungan (diterapkan di Tahap 6).
 
 ## Catatan standar akuntansi (Tahap 6)
 Laporan keuangan harus mengikuti **PSAP Nomor 13 — Penyajian Laporan Keuangan Badan Layanan Umum**
