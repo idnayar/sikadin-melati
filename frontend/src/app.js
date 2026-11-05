@@ -740,7 +740,7 @@ async function viewRekap(m) {
 }
 
 // ---------- Akuntansi & Laporan Keuangan (PSAP 13) ----------
-S.akTab = 'laporan'; S.akJenis = 'lra'; S.akBulan = 12;
+S.akTab = 'melati'; S.akJenis = 'lra'; S.akBulan = 12; S.lmBagian = 'lra'; S.lmBulan = 6;
 const LAP = [['lra', 'LRA'], ['lsal', 'L-SAL'], ['neraca', 'Neraca'], ['lo', 'LO'], ['lak', 'LAK'], ['lpe', 'LPE'], ['calk', 'CaLK']];
 const fl = n => n === null || n === undefined ? '' : n < 0 ? '(' + Math.abs(n).toLocaleString('id-ID') + ')' : n.toLocaleString('id-ID');
 const fx = (c, n) => c === '%' ? (n === null || n === undefined ? '' : String(n).replace('.', ',') + '%') : fl(n);
@@ -749,7 +749,35 @@ async function viewAkun(m) {
   const reload = () => viewAkun(m);
   let isi = '';
   const dlBtns = (jenis) => { const sf = jenis ? ' ' + jenis.toUpperCase() : ' (semua)'; return `<a class="btn small" href="/api/laporan/dok?tahun=${T}&bulan=${S.akBulan}${jenis ? '&jenis=' + jenis : ''}&format=pdf" target="_blank">PDF${sf}</a><button class="btn small" data-lap="docx" data-j="${jenis}">DOCX${sf}</button><button class="btn small" data-lap="xlsx" data-j="${jenis}">XLSX${sf}</button>`; };
-  if (tab === 'laporan') {
+  if (tab === 'melati') {
+    const LM = [['lra', 'LRA'], ['lra_blud', 'LRA BLUD'], ['neraca', 'Neraca'], ['lo', 'Laporan Operasional'], ['lpe', 'LPE'], ['teks', 'CaLK & Pengantar'], ['banding', 'Data tahun lalu']];
+    const f2 = n => { n = Math.round(n || 0); const s = Math.abs(n).toLocaleString('id-ID') + ',00'; return n < 0 ? '(' + s + ')' : s; };
+    const fpc = (a, b) => { if (!b) return '0,00'; const p = Math.round(10000 * a / b) / 100, s = Math.abs(p).toFixed(2).replace('.', ','); return p < 0 ? '(' + s + ')' : s; };
+    const dl = (bg) => `<a class="btn small" href="/api/laporan-melati/dok?tahun=${T}&bulan=${S.lmBulan}&bagian=${bg}&format=pdf" target="_blank">PDF</a><button class="btn small" data-lmd="docx" data-bg="${bg}">DOCX</button><button class="btn small" data-lmd="xlsx" data-bg="${bg}">XLSX</button>`;
+    let konten = '';
+    if (['lra', 'lra_blud', 'neraca', 'lo', 'lpe'].includes(S.lmBagian)) {
+      const d = await api(`/api/laporan-melati?tahun=${T}&bulan=${S.lmBulan}&bagian=${S.lmBagian}`);
+      const head = `<div style="text-align:center;line-height:1.35">${d.judul.map((j, i) => i === 2 ? `<b>${esc(j)}</b>` : esc(j)).join('<br>')}</div>`;
+      let tb = '';
+      if (d.jenis === 'lpe') tb = `<table><thead><tr><th>${d.kolom[0]}</th><th>${d.kolom[1]}</th><th>${d.kolom[2]}</th></tr></thead><tbody>${d.rows.map(r => `<tr><td>${esc(r[0])}</td><td class="num">${r[1] === null ? '' : f2(r[1])}</td><td class="num">${r[2] === null ? '' : f2(r[2])}</td></tr>`).join('')}</tbody></table>`;
+      else tb = `<table><thead><tr>${d.kolom.map(k => `<th>${esc(k)}</th>`).join('')}</tr>${d.angka ? `<tr>${d.angka.map(a => `<th style="font-weight:400">${esc(a)}</th>`).join('')}</tr>` : ''}</thead><tbody>${d.bagian_judul ? `<tr><td></td><td><b>${d.bagian_judul}</b></td><td colspan="4"></td></tr>` : ''}${d.rows.map(r => {
+        const v = r.v, b = r.b ? 'font-weight:700' : '', ind = d.jenis === 'neraca' ? `padding-left:${8 + r.lv * 10}px;` : '';
+        const sel = d.jenis === 'lo' ? v[0] - v[1] : 0;
+        const cells = d.jenis === 'neraca' ? `<td class="num">${f2(v[0])}</td><td class="num">${f2(v[1])}</td>` : d.jenis === 'lo' ? `<td class="num">${f2(v[0])}</td><td class="num">${f2(v[1])}</td><td class="num">${f2(sel)}</td><td class="num">${fpc(sel, v[1])}</td>` : `<td class="num">${f2(v[0])}</td><td class="num">${f2(v[1])}</td><td class="num">${fpc(v[1], v[0])}</td><td class="num">${f2(v[2])}</td>`;
+        return `<tr class="${/^(JUMLAH|SURPLUS|SISA)/.test(r.u) ? 'grp' : ''}" style="${b}"><td>${esc(r.k)}</td><td style="${ind}">${esc(r.u)}</td>${cells}</tr>`;
+      }).join('')}</tbody></table>`;
+      konten = `<div class="card">${head}<div class="tbl-wrap">${tb}</div><p style="margin:14px 0 0 55%">${esc(d.tanggal_ttd ? 'Kuala Kapuas, ' + d.tanggal_ttd : '')}<br><b>${esc(d.ttd)}</b><br><br><br><b>${esc(d.pejabat.nama)}</b><br>NIP. ${esc(d.pejabat.nip)}</p></div>`;
+    } else if (S.lmBagian === 'teks') {
+      const tk = await api('/api/laporan-melati/teks?tahun=' + T);
+      konten = `<p class="muted">Teks bawaan diambil dari Laporan Keuangan Semester 1 2026 Puskesmas Melati. Angka pada Bab III dan Bab V dihitung otomatis; ubah teks lain sesuai periode.</p>${tk.map(x => `<label>${esc(x.judul)}<textarea class="lmt" data-k="${x.kode}" rows="6">${esc(x.isi)}</textarea></label>`).join('')}<div class="bar"><span style="flex:1"></span><button class="btn primary" id="lmTeksSimpan">Simpan teks</button></div>`;
+    } else {
+      const pb = await api('/api/laporan-melati/pembanding?tahun=' + T);
+      konten = `<p class="muted">Kolom <b>${T - 1}</b> terisi otomatis dari jurnal SIKADIN tahun ${T - 1}. Bila belum ada jurnalnya, isi angka tahun lalu di sini: satu baris per kode rekening (<code>kode  jumlah</code>).</p>${[['lra', 'LRA — realisasi belanja ' + (T - 1), 'mis. 5.1.02.99.099  1977877565'], ['lo', 'Laporan Operasional — beban ' + (T - 1), 'mis. 8.1.02.99.099  1977877565'], ['neraca', 'Neraca per 31 Desember ' + (T - 1) + ' (aset, kewajiban, 3.1.01.01.001 Ekuitas, 3.1.01.02.01, 3.1.03.01.001)', 'mis. 1.1.01.04.001  2119612939']].map(([k, j, ph]) => `<label>${esc(j)}<textarea class="lmp" data-l="${k}" rows="5" placeholder="${ph}">${pb[k].map(r => r.kode + '  ' + r.jumlah).join('\n')}</textarea></label>`).join('')}<div class="bar"><span style="flex:1"></span><button class="btn primary" id="lmBandingSimpan">Simpan data tahun lalu</button></div>`;
+    }
+    isi = `<div class="bar"><select id="lmBln">${[[6, 'Semester 1 (s.d. Juni)'], [12, 'Tahunan (s.d. Desember)']].map(([v, l]) => `<option value="${v}" ${S.lmBulan === v ? 'selected' : ''}>${l}</option>`).join('')}${BLN.map((b, i) => ![6, 12].includes(i + 1) ? `<option value="${i + 1}" ${S.lmBulan === i + 1 ? 'selected' : ''}>s.d. ${b}</option>` : '').join('')}</select><span style="flex:1"></span>${dl('semua').replace(/>PDF</, '>PDF Laporan lengkap<').replace('>DOCX<', '>DOCX lengkap<').replace('>XLSX<', '>XLSX<')}</div>
+     <div class="tabs">${LM.map(([k, l]) => `<button class="tab ${S.lmBagian === k ? 'on' : ''}" data-lm="${k}">${l}</button>`).join('')}</div>
+     ${['lra', 'lra_blud', 'neraca', 'lo', 'lpe'].includes(S.lmBagian) ? `<div class="bar"><span class="muted">Unduh bagian ini:</span>${dl(S.lmBagian)}</div>` : ''}${konten}`;
+  } else if (tab === 'laporan') {
     const [rep, cek] = await Promise.all([api(`/api/laporan?tahun=${T}&bulan=${S.akBulan}&jenis=${S.akJenis}`), api(`/api/laporan/periksa?tahun=${T}&bulan=${S.akBulan}`)]);
     const kol = rep.kolom;
     isi = `${cek.ok ? '<div class="card" style="padding:8px;border-color:#86efac">✔ Pemeriksaan integritas: semua jurnal seimbang dan laporan saling cocok.</div>' : `<div class="card err" style="padding:8px">${cek.jurnal_tidak_seimbang.length ? 'Ada jurnal tidak seimbang. ' : ''}${cek.peringatan.map(esc).join('<br>')}</div>`}
@@ -783,14 +811,27 @@ async function viewAkun(m) {
     isi = `<p class="muted">Teks Catatan atas Laporan Keuangan. Angka rincian pos disusun otomatis dari jurnal.</p>${c.map(x => `<label>${esc(x.judul)}<textarea class="calk" data-k="${x.kode}" rows="4">${esc(x.isi)}</textarea></label>`).join('')}<div class="bar"><span style="flex:1"></span><button class="btn primary" id="calkSimpan">Simpan CaLK</button></div>`;
   }
   m.innerHTML = `<h2>Akuntansi &amp; Laporan Keuangan</h2>
-   <p class="muted">Laporan keuangan BLU menurut PSAP 13 — <b>satu kesatuan</b> semua sumber dana (DAU, BOK, BLUD). Hanya Kepala dan Bendahara BLUD.</p>
+   <p class="muted">Laporan keuangan BLUD <b>format resmi Puskesmas Melati</b> (LRA, Neraca, LO, LPE, CaLK; kode rekening BAS) — satu kesatuan semua sumber dana. Tab «PSAP 13» (7 komponen) tersedia sebagai tambahan. Hanya Kepala dan Bendahara BLUD.</p>
    <div class="bar"><label style="display:flex;gap:6px;align-items:center">Tahun <input id="akTh" type="number" value="${T}" style="width:90px"></label>
-    ${tab === 'laporan' ? `<select id="akBln">${BLN.map((b, i) => `<option value="${i + 1}" ${S.akBulan === i + 1 ? 'selected' : ''}>s.d. ${b}</option>`).join('')}</select><span style="flex:1"></span>${dlBtns('')}${dlBtns(S.akJenis)}` : ''}</div>
-   <div class="tabs">${[['laporan', 'Laporan'], ['jurnal', 'Jurnal'], ['saldo', 'Saldo awal'], ['anggaran', 'Anggaran pendapatan'], ['bagan', 'Bagan akun'], ['calk', 'Teks CaLK']].map(([k, l]) => `<button class="tab ${tab === k ? 'on' : ''}" data-tab="${k}">${l}</button>`).join('')}</div>${isi}`;
+    ${tab === 'melati' ? '' : tab === 'laporan' ? `<select id="akBln">${BLN.map((b, i) => `<option value="${i + 1}" ${S.akBulan === i + 1 ? 'selected' : ''}>s.d. ${b}</option>`).join('')}</select><span style="flex:1"></span>${dlBtns('')}${dlBtns(S.akJenis)}` : ''}</div>
+   <div class="tabs">${[['melati', 'Laporan Puskesmas Melati'], ['laporan', 'Laporan PSAP 13 (tambahan)'], ['jurnal', 'Jurnal'], ['saldo', 'Saldo awal'], ['anggaran', 'Anggaran pendapatan'], ['bagan', 'Bagan akun'], ['calk', 'Teks CaLK']].map(([k, l]) => `<button class="tab ${tab === k ? 'on' : ''}" data-tab="${k}">${l}</button>`).join('')}</div>${isi}`;
   $('#akTh').onchange = e => { S.bokTahun = Number(e.target.value) || T; reload(); };
   if ($('#akBln')) $('#akBln').onchange = e => { S.akBulan = Number(e.target.value); reload(); };
   m.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { S.akTab = b.dataset.tab; reload(); });
   m.querySelectorAll('[data-jenis]').forEach(b => b.onclick = () => { S.akJenis = b.dataset.jenis; reload(); });
+  m.querySelectorAll('[data-lm]').forEach(b => b.onclick = () => { S.lmBagian = b.dataset.lm; reload(); });
+  if ($('#lmBln')) $('#lmBln').onchange = e => { S.lmBulan = Number(e.target.value); reload(); };
+  m.querySelectorAll('[data-lmd]').forEach(b => b.onclick = () => download(`/api/laporan-melati/dok?tahun=${T}&bulan=${S.lmBulan}&bagian=${b.dataset.bg}&format=${b.dataset.lmd}`, `Laporan_Keuangan_Melati_${T}_${b.dataset.bg}.${b.dataset.lmd}`));
+  if ($('#lmTeksSimpan')) $('#lmTeksSimpan').onclick = async () => { const t = {}; m.querySelectorAll('.lmt').forEach(x => { t[x.dataset.k] = x.value; }); try { await api('/api/laporan-melati/teks', { method: 'PUT', body: { tahun: T, teks: t } }); toast('Teks tersimpan.'); } catch (x) { toast(x.message, 1); } };
+  if ($('#lmBandingSimpan')) $('#lmBandingSimpan').onclick = async () => {
+    try {
+      for (const ta of m.querySelectorAll('.lmp')) {
+        const items = ta.value.split('\n').map(l => l.trim()).filter(Boolean).map(l => { const p = l.split(/[\s;\t]+/); return { kode: p[0], jumlah: p.slice(1).join('') }; });
+        await api('/api/laporan-melati/pembanding', { method: 'PUT', body: { tahun: T, laporan: ta.dataset.l, items } });
+      }
+      toast('Data tahun lalu tersimpan.');
+    } catch (x) { toast(x.message, 1); }
+  };
   m.querySelectorAll('[data-lap]').forEach(b => b.onclick = () => download(`/api/laporan/dok?tahun=${T}&bulan=${S.akBulan}${b.dataset.j ? '&jenis=' + b.dataset.j : ''}&format=${b.dataset.lap}`, `Laporan_Keuangan_${T}${b.dataset.j ? '_' + b.dataset.j : ''}.${b.dataset.lap}`));
   const aksi = fn => async () => { try { await fn(); } catch (x) { toast(x.message, 1); } };
   if ($('#akPend')) $('#akPend').onclick = async () => {
@@ -974,11 +1015,11 @@ async function viewNomor(m) {
    Seri nomor <b>terpisah</b> untuk BOK, DAU, BLUD, dan Surat Umum; nomor tidak pernah dipakai ulang. Nomor resmi Surat Tugas tetap diberikan Srikandi saat TTE.</p>
    <div class="bar"><label style="display:flex;gap:6px;align-items:center">Tahun <input id="nTh" type="number" value="${T}" style="width:90px"></label>
     <select id="nJn"><option value="">Semua jenis</option>${jenis.map(j => `<option value="${j.kode}" ${S.nmJenis === j.kode ? 'selected' : ''}>${esc(j.nama)}</option>`).join('')}</select><span style="flex:1"></span>
-    <button class="btn primary" id="nBaru">+ Terbitkan nomor surat</button></div>
+    <button class="btn" id="nGen" title="Langsung dapat nomor berikutnya (perihal diisi nanti)">⚡ Generate nomor otomatis</button><button class="btn primary" id="nBaru">+ Terbitkan nomor surat</button></div>
    <div class="tbl-wrap"><table><thead><tr><th>Nomor</th><th>Tanggal</th><th>Perihal / tujuan</th><th>Status</th><th></th></tr></thead><tbody>
     ${daftar.map(n => `<tr class="${n.status === 'Dibatalkan' ? 'batal' : ''}"><td style="white-space:nowrap"><b>${esc(n.nomor)}</b></td><td>${tglID(n.tanggal)}</td><td>${esc(n.perihal)}${n.tujuan ? `<br><span class="muted">kepada ${esc(n.tujuan)}</span>` : ''}</td>
       <td><span class="badge ${n.status === 'Terbit' ? 'st-Disetujui' : 'st-Dibatalkan'}">${n.status}</span>${n.alasan_batal ? `<br><span class="err" style="font-size:.8em">${esc(n.alasan_batal)}</span>` : ''}</td>
-      <td>${n.status === 'Terbit' ? `<button class="btn small danger" data-batal="${n.id}">Batalkan</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">Belum ada nomor surat umum pada tahun ini. Nomor Surat Tugas ada di menu Surat Tugas &amp; SPD.</td></tr>'}</tbody></table></div>
+      <td>${n.status === 'Terbit' ? `${n.perihal.startsWith('(nomor dicadangkan') ? `<button class="btn small primary" data-perihal="${n.id}">Isi perihal</button> ` : ''}<button class="btn small danger" data-batal="${n.id}">Batalkan</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">Belum ada nomor surat umum pada tahun ini. Nomor Surat Tugas ada di menu Surat Tugas &amp; SPD.</td></tr>'}</tbody></table></div>
    <h3 style="margin-top:22px">Kode penomoran</h3>
    <div class="tbl-wrap"><table><thead><tr><th>Jenis</th><th>Klasifikasi</th><th>Kode unit</th><th>Contoh nomor berikutnya</th>${kepala ? '<th></th>' : ''}</tr></thead><tbody id="nKode"></tbody></table></div>
    <p class="muted" style="font-size:.85em">Kode unit membedakan seri BOK / DAU / BLUD / Umum. Hanya Kepala Puskesmas yang dapat mengubah kode; perubahan berlaku untuk nomor berikutnya.</p>`;
@@ -989,6 +1030,14 @@ async function viewNomor(m) {
   const reload = () => viewNomor(m);
   $('#nTh').onchange = e => { S.bokTahun = Number(e.target.value) || T; reload(); };
   $('#nJn').onchange = e => { S.nmJenis = e.target.value; reload(); };
+  $('#nGen').onclick = async () => {
+    const jn = $('#nJn').value && !$('#nJn').value.startsWith('ST-') ? $('#nJn').value : (umum[0] && umum[0].kode) || 'UMUM';
+    try {
+      const r = await api('/api/nomor', { method: 'POST', body: { jenis: jn, tanggal: hari } });
+      try { await navigator.clipboard.writeText(r.nomor); } catch { /* salin manual */ }
+      toast(`Nomor: ${r.nomor} (tersalin). Isi perihalnya di daftar.`); await reload();
+    } catch (x) { toast(x.message, 1); }
+  };
   $('#nBaru').onclick = () => {
     dialog('Terbitkan nomor surat', `<label>Jenis<select name="jenis">${umum.map(j => `<option value="${j.kode}">${esc(j.nama)}</option>`).join('')}</select></label>
       <div class="grid2"><label>Tanggal surat<input name="tanggal" type="date" value="${hari}" required></label><label>Klasifikasi (boleh dirinci)<input name="klasifikasi" placeholder="${esc(umum[0]?.klasifikasi || '000')}"></label></div>
@@ -1000,7 +1049,8 @@ async function viewNomor(m) {
     f.addEventListener('input', () => { clearTimeout(tm); tm = setTimeout(seg, 250); }); f.addEventListener('change', seg); seg();
   };
   m.onclick = e => {
-    const b = e.target.closest('[data-batal]'), k = e.target.closest('[data-kode]');
+    const b = e.target.closest('[data-batal]'), k = e.target.closest('[data-kode]'), ph = e.target.closest('[data-perihal]');
+    if (ph) dialog('Isi perihal nomor', '<label>Perihal<input name="perihal" required minlength="3"></label><label>Tujuan / kepada (opsional)<input name="tujuan"></label>', async d => { await api(`/api/nomor/${ph.dataset.perihal}/perihal`, { method: 'PUT', body: d }); toast('Perihal tersimpan.'); await reload(); });
     if (b) dialog('Batalkan nomor?', '<p>Nomor yang dibatalkan <b>tidak dipakai ulang</b>.</p><label>Alasan<input name="alasan" required minlength="5"></label>', async d => { await api(`/api/nomor/${b.dataset.batal}/batal`, { method: 'POST', body: d }); toast('Nomor dibatalkan.'); await reload(); }, 'Batalkan');
     if (k) { const j = jenis.find(x => x.kode === k.dataset.kode); dialog('Kode penomoran — ' + j.nama, `<div class="grid2"><label>Klasifikasi arsip<input name="klasifikasi" value="${esc(j.klasifikasi)}" required></label><label>Kode unit<input name="unit" value="${esc(j.unit)}" required></label></div>
       <label>Format<input name="format" value="${esc(j.format)}" required></label><p class="muted" style="font-size:.82em">Kode yang tersedia: {klasifikasi} {yymm} {urut} {unit} {bulan_romawi} {tahun}. Format wajib memuat {urut}.</p>`, async d => { await api('/api/nomor/jenis/' + j.kode, { method: 'PUT', body: d }); toast('Kode penomoran disimpan.'); await reload(); }); }

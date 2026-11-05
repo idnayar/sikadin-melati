@@ -79,6 +79,27 @@ def pratinjau(jenis: str = "UMUM", tanggal: str | None = None, klasifikasi: str 
     return {"nomor": bentuk_nomor(db, jenis, tanggal or dt.date.today().isoformat(), klasifikasi)[0]}
 
 
+CADANGAN = "(nomor dicadangkan — perihal belum diisi)"
+
+
+@router.put("/{nid}/perihal")
+def isi_perihal(nid: int, body: dict = Body(default={}), user=Depends(perlu_baca), db=Depends(get_db)):
+    """Mengisi perihal/tujuan nomor yang dicadangkan (generate otomatis). Nomor tidak berubah."""
+    n = db.execute("SELECT * FROM nomor_surat WHERE id=?", (nid,)).fetchone()
+    if not n:
+        raise Gagal("Nomor tidak ditemukan.", 404)
+    if user["role"] not in ("kepala", "bendahara", "bendahara_blud") and n["dibuat_oleh"] != user["username"]:
+        raise Gagal("Hanya pembuat nomor atau pengelola yang dapat mengisi perihal.", 403)
+    if n["status"] != "Terbit":
+        raise Gagal("Nomor sudah dibatalkan.")
+    perihal = str(body.get("perihal") or "").strip()
+    if len(perihal) < 3:
+        raise Gagal("Perihal wajib diisi.")
+    db.execute("UPDATE nomor_surat SET perihal=?, tujuan=? WHERE id=?", (perihal, str(body.get("tujuan") or n["tujuan"] or "").strip() or None, nid))
+    audit(db, user, "nomor_surat", nid, "ISI-PERIHAL", {"perihal": n["perihal"]}, {"perihal": perihal})
+    return {"ok": True}
+
+
 @router.post("")
 def terbit(body: dict = Body(default={}), user=Depends(perlu_baca), db=Depends(get_db)):
     """Terbitkan nomor untuk surat umum/lainnya. Jenis ST-* otomatis lewat Surat Tugas, bukan di sini."""
@@ -90,9 +111,7 @@ def terbit(body: dict = Body(default={}), user=Depends(perlu_baca), db=Depends(g
         tanggal = dt.date.fromisoformat(str(body.get("tanggal") or dt.date.today().isoformat())[:10]).isoformat()
     except ValueError:
         raise Gagal("Tanggal tidak valid.")
-    perihal = str(body.get("perihal") or "").strip()
-    if not perihal:
-        raise Gagal("Perihal wajib diisi.")
+    perihal = str(body.get("perihal") or "").strip() or CADANGAN   # generate otomatis: perihal boleh diisi nanti
     klas = str(body.get("klasifikasi") or j["klasifikasi"]).strip()
     nomor, urut = bentuk_nomor(db, jenis, tanggal, klas)
     nid = db.execute("INSERT INTO nomor_surat(jenis,tahun,nomor_urut,nomor,klasifikasi,tanggal,perihal,tujuan,dibuat_oleh) VALUES(?,?,?,?,?,?,?,?,?)",

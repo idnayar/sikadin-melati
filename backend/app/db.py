@@ -204,7 +204,11 @@ CREATE TABLE IF NOT EXISTS akun(
   id INTEGER PRIMARY KEY, kode TEXT NOT NULL UNIQUE, nama TEXT NOT NULL,
   jenis TEXT NOT NULL CHECK(jenis IN ('ASET','KEWAJIBAN','EKUITAS','PENDAPATAN','BEBAN')),
   normal TEXT NOT NULL CHECK(normal IN ('D','K')), kas INTEGER NOT NULL DEFAULT 0, arus TEXT NOT NULL DEFAULT 'OPERASI' CHECK(arus IN ('OPERASI','INVESTASI','PENDANAAN')),
-  lra TEXT CHECK(lra IN ('BELANJA_MODAL','PEMBIAYAAN')), aktif INTEGER NOT NULL DEFAULT 1);
+  lra TEXT CHECK(lra IN ('BELANJA_MODAL','PEMBIAYAAN')), aktif INTEGER NOT NULL DEFAULT 1, kode_bas TEXT, kode_lra TEXT);
+-- Nama baris induk pada laporan format Puskesmas Melati (kode rekening BAS bertingkat)
+CREATE TABLE IF NOT EXISTS bas_nama(kode TEXT PRIMARY KEY, nama TEXT NOT NULL);
+-- Data pembanding tahun lalu (diinput manual bila belum ada jurnal): laporan = 'lra' | 'lo' | 'neraca'
+CREATE TABLE IF NOT EXISTS pembanding(tahun INTEGER NOT NULL, laporan TEXT NOT NULL, kode TEXT NOT NULL, jumlah INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(tahun, laporan, kode));
 CREATE TABLE IF NOT EXISTS jurnal(
   id INTEGER PRIMARY KEY, tahun INTEGER NOT NULL, tanggal TEXT NOT NULL, no_bukti TEXT, uraian TEXT NOT NULL,
   basis TEXT NOT NULL CHECK(basis IN ('AWAL','KAS','AKRUAL')), sumber_dana_id INTEGER REFERENCES sumber_dana(id),
@@ -225,6 +229,20 @@ AKUN_AWAL = [
     ("1.1.1.02", "Kas BLUD (Kas pada BLU)", "ASET", "D", 1, "OPERASI", None),
     ("1.1.1.03", "Kas Bendahara Penerimaan (Retribusi)", "ASET", "D", 1, "OPERASI", None),
     ("1.1.1.04", "Kas Bendahara Pengeluaran Pembantu — DAU", "ASET", "D", 1, "OPERASI", None),
+    ("1.1.1.05", "Kas Lainnya", "ASET", "D", 1, "OPERASI", None),
+    ("1.3.02.05.002", "Alat Rumah Tangga", "ASET", "D", 0, "INVESTASI", "BELANJA_MODAL"),
+    ("1.3.02.06.001", "Alat Studio", "ASET", "D", 0, "INVESTASI", "BELANJA_MODAL"),
+    ("1.3.02.06.002", "Alat Komunikasi", "ASET", "D", 0, "INVESTASI", "BELANJA_MODAL"),
+    ("1.3.02.07.002", "Alat Kesehatan Umum", "ASET", "D", 0, "INVESTASI", "BELANJA_MODAL"),
+    ("1.3.02.10.001", "Komputer Unit", "ASET", "D", 0, "INVESTASI", "BELANJA_MODAL"),
+    ("1.3.02.10.002", "Peralatan Komputer", "ASET", "D", 0, "INVESTASI", "BELANJA_MODAL"),
+    ("1.3.02.11.002", "Alat Eksplorasi Geofisika", "ASET", "D", 0, "INVESTASI", "BELANJA_MODAL"),
+    ("1.3.02.14.001", "Alat Bantu Eksplorasi", "ASET", "D", 0, "INVESTASI", "BELANJA_MODAL"),
+    ("5.1.02.01.001", "Belanja Barang Pakai Habis", "BEBAN", "D", 0, "OPERASI", None),
+    ("5.1.02.02.001", "Belanja Jasa Kantor", "BEBAN", "D", 0, "OPERASI", None),
+    ("5.1.02.03.003", "Belanja Pemeliharaan Gedung dan Bangunan", "BEBAN", "D", 0, "OPERASI", None),
+    ("5.1.02.04.001", "Belanja Perjalanan Dinas Dalam Negeri", "BEBAN", "D", 0, "OPERASI", None),
+    ("5.1.02.99.099", "Belanja Barang dan Jasa BLUD", "BEBAN", "D", 0, "OPERASI", None),
     ("1.1.2.01", "Piutang Jasa Layanan", "ASET", "D", 0, "OPERASI", None),
     ("1.1.3.01", "Persediaan Obat dan BMHP", "ASET", "D", 0, "OPERASI", None),
     ("1.1.4.01", "Belanja Dibayar di Muka", "ASET", "D", 0, "OPERASI", None),
@@ -246,6 +264,25 @@ AKUN_AWAL = [
     ("5.1.2.03", "Belanja/Beban Obat dan BMHP", "BEBAN", "D", 0, "OPERASI", None),
     ("5.1.3.01", "Beban Penyusutan", "BEBAN", "D", 0, "OPERASI", None),
     ("5.1.9.01", "Beban Lain-lain", "BEBAN", "D", 0, "OPERASI", None),
+]
+
+
+# Pemetaan kode rekening BAS (sesuai Laporan Keuangan BLUD Puskesmas Melati Semester 1 2026). Akun baru berkode BAS langsung.
+KODE_BAS = {"1.1.1.01": "1.1.01.11.001", "1.1.1.02": "1.1.01.04.001", "1.1.1.03": "1.1.01.02.001", "1.1.1.04": "1.1.01.03.001", "1.1.1.05": "1.1.01.07.001",
+            "3.1.1.01": "3.1.01.01.001", "4.1.1.01": "4.1.04.16.02", "4.1.1.02": "4.1.04.16.02"}
+BAS_NAMA = [
+    ("1", "ASET"), ("1.1", "ASET LANCAR"), ("1.1.01", "Kas dan Setara Kas"), ("1.1.01.02", "Kas di Bendahara Penerimaan"), ("1.1.01.02.001", "Kas di Bendahara Penerimaan"),
+    ("1.1.01.03", "Kas di Bendahara Pengeluaran"), ("1.1.01.03.001", "Kas di Bendahara Pengeluaran"), ("1.1.01.04", "Kas di BLUD"), ("1.1.01.04.001", "Kas di BLUD"),
+    ("1.1.01.07", "Kas Lainnya"), ("1.1.01.07.001", "Kas Lainnya"), ("1.1.01.11", "Kas Dana BOK Puskesmas"), ("1.1.01.11.001", "Kas Dana BOK Puskesmas"),
+    ("1.3", "ASET TETAP"), ("1.3.02", "Peralatan dan Mesin"), ("1.3.02.05", "Alat Kantor dan Rumah Tangga"), ("1.3.02.06", "Alat Studio, Komunikasi, dan Pemancar"),
+    ("1.3.02.07", "Alat Kedokteran dan Kesehatan"), ("1.3.02.10", "Komputer"), ("1.3.02.11", "Alat Eksplorasi"), ("1.3.02.14", "Alat Bantu Eksplorasi"),
+    ("2", "KEWAJIBAN"), ("3", "EKUITAS"), ("3.1", "EKUITAS"), ("3.1.01", "Ekuitas"), ("3.1.01.01", "Ekuitas"), ("3.1.01.01.001", "Ekuitas"),
+    ("3.1.01.02", "Surplus/Defisit-LO"), ("3.1.01.02.01", "Surplus/Defisit-LO"), ("3.1.03", "Ekuitas untuk Dikonsolidasikan"), ("3.1.03.01", "RK PPKD"), ("3.1.03.01.001", "RK PPKD"),
+    ("4", "PENDAPATAN DAERAH"), ("4.1", "PENDAPATAN ASLI DAERAH (PAD)"), ("4.1.04", "Lain-lain PAD yang Sah"), ("4.1.04.16", "Pendapatan BLUD"), ("4.1.04.16.02", "Pendapatan BLUD dari Jasa Layanan"),
+    ("5", "BELANJA DAERAH"), ("5.1", "BELANJA OPERASI"), ("5.1.02", "Belanja Barang dan Jasa"), ("5.1.02.01", "Belanja Barang"), ("5.1.02.01.001", "Belanja Barang Pakai Habis"),
+    ("5.1.02.02", "Belanja Jasa"), ("5.1.02.02.001", "Belanja Jasa Kantor"), ("5.1.02.03", "Belanja Pemeliharaan"), ("5.1.02.03.003", "Belanja Pemeliharaan Gedung dan Bangunan"),
+    ("5.1.02.04", "Belanja Perjalanan Dinas"), ("5.1.02.04.001", "Belanja Perjalanan Dinas Dalam Negeri"), ("5.1.02.99", "Belanja Barang dan Jasa BLUD"), ("5.1.02.99.099", "Belanja Barang dan Jasa BLUD"),
+    ("5.2", "BELANJA MODAL"), ("5.2.02", "Belanja Modal Peralatan dan Mesin"), ("5.2.02.99", "Belanja Modal Peralatan dan Mesin BLUD"), ("5.2.02.99.099", "Belanja Modal Peralatan dan Mesin BLUD"),
 ]
 
 
@@ -413,6 +450,16 @@ def init_db() -> None:
         if kol_b and kol not in kol_b:
             con.execute(f"ALTER TABLE jurnal_baris ADD COLUMN {kol} TEXT")
     con.execute("UPDATE akun SET nama='Kas Bendahara Pengeluaran Pembantu — BOK' WHERE kode='1.1.1.01' AND nama LIKE 'Kas di Bendahara Pengeluaran%'")
+    kol_a = {r["name"] for r in con.execute("PRAGMA table_info(akun)").fetchall()}
+    for kol in ("kode_bas", "kode_lra"):
+        if kol not in kol_a:
+            con.execute(f"ALTER TABLE akun ADD COLUMN {kol} TEXT")
+    for k_int, k_bas in KODE_BAS.items():
+        con.execute("UPDATE akun SET kode_bas=? WHERE kode=? AND kode_bas IS NULL", (k_bas, k_int))
+    con.execute("UPDATE akun SET kode_bas=kode WHERE kode_bas IS NULL AND (kode LIKE '5.1.02.%' OR kode LIKE '1.3.02.%')")
+    con.execute("UPDATE akun SET kode_lra='5.2.02.99.099' WHERE lra='BELANJA_MODAL' AND kode_lra IS NULL")
+    for k_b, n_b in BAS_NAMA:
+        con.execute("INSERT OR IGNORE INTO bas_nama(kode,nama) VALUES(?,?)", (k_b, n_b))
     # Pejabat pembuat BKU (data dari contoh BKU Agustus 2026); ditambahkan bila belum ada
     for peran, nama, nip, pangkat, jabatan in PEJABAT_BKU:
         if con.execute("SELECT COUNT(*) c FROM pejabat").fetchone()["c"] and not con.execute("SELECT 1 FROM pejabat WHERE peran=?", (peran,)).fetchone():

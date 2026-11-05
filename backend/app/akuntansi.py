@@ -32,18 +32,21 @@ def kode_kas(dana: str) -> str:
     return {"BLUD": KAS_BLUD, "DAU": KAS_DAU, "RETRIBUSI": KAS_RETRIBUSI}.get(str(dana).upper(), KAS_BOK)
 
 
-def peta_belanja(jenis_belanja: str) -> str:
-    """Jenis belanja pada RAB -> kode akun. Dipakai jurnal otomatis SPJ dan anggaran belanja pada LRA."""
+def peta_belanja(jenis_belanja: str, sumber: str = "") -> str:
+    """Jenis belanja pada RAB (+ sumber dana) -> kode akun berkode BAS. Dipakai jurnal otomatis SPJ dan anggaran belanja pada LRA.
+    BLUD -> Belanja Barang dan Jasa BLUD (5.1.02.99.099); BOK/DAU dirinci: barang pakai habis, jasa kantor, pemeliharaan, perjalanan dinas."""
     j = str(jenis_belanja or "").lower()
-    if "perjalanan" in j:
-        return "5.1.2.02"
-    if any(k in j for k in ("insentif", "honor", "gaji", "jasa pelayanan", "pegawai")):
-        return "5.1.1.01"
-    if any(k in j for k in ("obat", "bmhp", "alkes")):
-        return "5.1.2.03"
     if any(k in j for k in ("modal", "peralatan", "mesin", "laptop", "komputer", "printer")):
         return "1.3.2.01"
-    return "5.1.2.01"
+    if str(sumber).upper() == "BLUD":
+        return "5.1.02.99.099"
+    if "perjalanan" in j:
+        return "5.1.02.04.001"
+    if any(k in j for k in ("pemeliharaan", "perbaikan", "service", "servis")):
+        return "5.1.02.03.003"
+    if any(k in j for k in ("jasa", "honor", "insentif", "internet", "listrik", "telepon", "narasumber", "transport", "pelayanan")):
+        return "5.1.02.02.001"
+    return "5.1.02.01.001"
 
 
 def _tgl(v, nama="Tanggal") -> str:
@@ -85,7 +88,7 @@ def jurnal_spj_bayar(db, user, spj: dict) -> None:
     if n("SPJ") > n("SPJ_BALIK"):
         return
     b = db.execute("SELECT jenis_belanja FROM bok_baris WHERE id=?", (spj["baris_id"],)).fetchone()
-    beban = _akun(db, peta_belanja(b["jenis_belanja"] if b else ""))
+    beban = _akun(db, peta_belanja(b["jenis_belanja"] if b else "", spj["dana"]))
     kas = _akun(db, kode_kas(spj["dana"]))
     nama = spj.get("pegawai_nama") or spj.get("penerima")
     buat_jurnal(db, user, spj["tanggal_bayar"], f"Pembayaran {spj['uraian']}" + (f" An. {nama}" if nama else ""), "KAS", [(beban["id"], spj["total"], 0), (kas["id"], 0, spj["total"])],

@@ -115,8 +115,9 @@ class Hitung:
 def _anggaran(db, tahun):
     pend = {r["kode"]: r["jumlah"] for r in db.execute("SELECT a.kode, p.jumlah FROM anggaran_pendapatan p JOIN akun a ON a.id=p.akun_id WHERE p.tahun=?", (tahun,)).fetchall()}
     bel: dict = {}
-    for r in db.execute("""SELECT b.jenis_belanja, SUM(b.jumlah) j FROM bok_baris b JOIN bok_rincian r ON r.id=b.rincian_id JOIN bok_menu m ON m.id=r.menu_id WHERE m.tahun=? GROUP BY b.jenis_belanja""", (tahun,)).fetchall():
-        _tambah(bel, peta_belanja(r["jenis_belanja"]), r["j"])
+    for r in db.execute("""SELECT b.jenis_belanja, sd.kode dana, SUM(b.jumlah) j FROM bok_baris b JOIN bok_rincian r ON r.id=b.rincian_id JOIN bok_menu m ON m.id=r.menu_id
+        JOIN sumber_dana sd ON sd.id=m.sumber_dana_id WHERE m.tahun=? GROUP BY b.jenis_belanja, sd.kode""", (tahun,)).fetchall():
+        _tambah(bel, peta_belanja(r["jenis_belanja"], r["dana"]), r["j"])
     return pend, bel
 
 
