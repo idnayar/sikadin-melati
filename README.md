@@ -37,7 +37,8 @@ Variabel lain: `SIKADIN_DB` (lokasi file database), `SIKADIN_DIST` (lokasi build
 ## Status tahap
 - [x] 1. Master data & tarif Perbup
 - [x] 2. Pagu & RAB BOK 2027, Perencanaan BOK (RPK/POA)
-- [ ] 3. Jadwal + anti-doubling  - [ ] 4. ST/SPD (format Srikandi)  - [ ] 5. Panjar & SPJ
+- [x] 3. Jadwal dinas luar + anti-doubling (kalender, bagi petugas otomatis, constraint DB)
+- [ ] 4. ST/SPD (format Srikandi)  - [ ] 5. Panjar & SPJ
 - [ ] 6. Rekap & laporan  - [ ] 7. Dashboard  - [ ] DAU/BLUD
 
 ## Catatan teknis
@@ -45,3 +46,13 @@ Variabel lain: `SIKADIN_DB` (lokasi file database), `SIKADIN_DIST` (lokasi build
 - Skema SQL standar; pindah ke PostgreSQL/Supabase cukup mengganti `INTEGER PRIMARY KEY` → `bigserial` dan fungsi tanggal.
   Constraint anti-doubling (tahap 3): `UNIQUE(pegawai_id, tanggal)` pada tabel rincian harian penugasan.
 - Kontrak API (`/api/...`) sama dengan versi Node sebelumnya, jadi UI tidak berubah.
+
+## Catatan standar akuntansi (Tahap 6)
+Laporan keuangan harus mengikuti **PSAP Nomor 13 — Penyajian Laporan Keuangan Badan Layanan Umum**
+(PMK 217/PMK.05/2015). Komponennya ada tujuh: Laporan Realisasi Anggaran, Laporan Perubahan Saldo Anggaran Lebih,
+Neraca, Laporan Operasional, Laporan Arus Kas, Laporan Perubahan Ekuitas, dan Catatan atas Laporan Keuangan.
+Neraca/LO/LAK/LPE memerlukan data di luar perjalanan dinas (kas, pendapatan BLUD, persediaan, aset tetap, utang);
+ruang lingkupnya perlu diputuskan sebelum Tahap 6 dikerjakan.
+
+## Identitas visual
+Lambang Kabupaten Kapuas dan logo UPT Puskesmas Melati ada di `frontend/public/brand/` (berkas milik Puskesmas).

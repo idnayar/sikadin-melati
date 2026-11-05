@@ -3,25 +3,48 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SIKADIN – Puskesmas Melati</title>
+<meta name="theme-color" content="#14532d">
+<title>SIKADIN – UPT Puskesmas Melati, Kabupaten Kapuas</title>
+<link rel="icon" href="/brand/logo-puskesmas.jpg">
 <link rel="stylesheet" href="/src/app.css">
 </head>
 <body>
 <div id="login" class="login" hidden>
-  <form id="loginForm" class="card login-card">
+  <aside class="hero" aria-hidden="false">
+    <div class="hero-logos">
+      <img src="/brand/lambang-kapuas.png" alt="Lambang Kabupaten Kapuas" class="logo-lambang">
+      <img src="/brand/logo-puskesmas.jpg" alt="Logo UPT Puskesmas Melati" class="logo-pkm">
+    </div>
     <h1>SIKADIN</h1>
-    <p class="muted">Sistem Informasi Keuangan &amp; Dinas Luar<br>UPT Puskesmas Melati, Kec. Selat, Kab. Kapuas</p>
-    <label>Username<input name="username" autocomplete="username" required></label>
-    <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
-    <div id="loginErr" class="err" role="alert"></div>
-    <button class="btn primary" type="submit">Masuk</button>
-  </form>
+    <p class="hero-sub">Sistem Informasi Keuangan &amp; Dinas Luar</p>
+    <ul class="hero-list">
+      <li>Perencanaan anggaran &amp; RAB BOK</li>
+      <li>Jadwal dinas luar tanpa bentrok</li>
+      <li>Surat Tugas, SPD &amp; SPJ</li>
+      <li>Laporan keuangan sesuai Perbup</li>
+    </ul>
+    <div class="hero-foot">Pemerintah Kabupaten Kapuas<br>Dinas Kesehatan · UPT Puskesmas Melati<br><span>Kec. Selat, Kuala Kapuas, Kalimantan Tengah</span></div>
+  </aside>
+  <main class="login-pane">
+    <form id="loginForm" class="card login-card">
+      <div class="login-mini"><img src="/brand/lambang-kapuas.png" alt=""><img src="/brand/logo-puskesmas.jpg" alt=""></div>
+      <h2>Masuk ke SIKADIN</h2>
+      <p class="muted">Gunakan akun yang diberikan oleh Kepala Puskesmas / Bendahara.</p>
+      <label>Username<input name="username" autocomplete="username" required autofocus></label>
+      <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
+      <div id="loginErr" class="err" role="alert"></div>
+      <button class="btn primary" type="submit">Masuk</button>
+      <p class="login-note">Aplikasi internal. Setiap perubahan data tercatat atas nama pengguna.</p>
+    </form>
+  </main>
 </div>
 
 <div id="app" hidden>
   <header class="top">
     <button id="menuBtn" class="icon-btn" aria-label="Menu">☰</button>
-    <div class="brand">SIKADIN <small>Puskesmas Melati</small></div>
+    <img class="top-logo" src="/brand/lambang-kapuas.png" alt="Lambang Kabupaten Kapuas">
+    <img class="top-logo round" src="/brand/logo-puskesmas.jpg" alt="Logo Puskesmas Melati">
+    <div class="brand">SIKADIN<small>UPT Puskesmas Melati · Kabupaten Kapuas</small></div>
     <div class="spacer"></div>
     <span id="who" class="who"></span>
     <button id="pwBtn" class="btn small">Ganti password</button>

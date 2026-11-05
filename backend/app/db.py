@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS pegawai(
   id INTEGER PRIMARY KEY, nama TEXT NOT NULL, nip TEXT UNIQUE, pangkat TEXT, golongan TEXT,
   jabatan TEXT, eselon TEXT, status TEXT NOT NULL DEFAULT 'ASN' CHECK(status IN ('ASN','PPPK','Non ASN')),
   program TEXT, tingkat TEXT NOT NULL DEFAULT 'D' CHECK(tingkat IN ('A','B','C','D')),
-  aktif INTEGER NOT NULL DEFAULT 1);
+  aktif INTEGER NOT NULL DEFAULT 1, ruangan TEXT, telepon TEXT);
 CREATE TABLE IF NOT EXISTS sumber_dana(
   id INTEGER PRIMARY KEY, kode TEXT NOT NULL UNIQUE, nama TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS pagu(
@@ -80,6 +80,41 @@ CREATE INDEX IF NOT EXISTS ix_rencana_baris ON rencana(baris_id);
 CREATE TABLE IF NOT EXISTS cuti(
   id INTEGER PRIMARY KEY, pegawai_id INTEGER NOT NULL REFERENCES pegawai(id),
   mulai TEXT NOT NULL, selesai TEXT NOT NULL, keterangan TEXT, CHECK(selesai >= mulai));
+
+-- Tahap 3: Jadwal dinas luar. Satu jadwal = satu pelaksanaan (mulai–selesai) dari satu rencana yang disetujui.
+CREATE TABLE IF NOT EXISTS jadwal(
+  id INTEGER PRIMARY KEY, rencana_id INTEGER NOT NULL REFERENCES rencana(id), tahun INTEGER NOT NULL,
+  baris_id INTEGER NOT NULL REFERENCES bok_baris(id), kegiatan TEXT NOT NULL,
+  lokasi_id INTEGER NOT NULL REFERENCES lokasi(id), sumber_dana_id INTEGER NOT NULL REFERENCES sumber_dana(id),
+  mulai TEXT NOT NULL, selesai TEXT NOT NULL, durasi TEXT NOT NULL DEFAULT 'gt8' CHECK(durasi IN ('gt8','le8')),
+  status TEXT NOT NULL DEFAULT 'Diusulkan' CHECK(status IN ('Diusulkan','Disetujui','Ditolak','Dibatalkan','Terlaksana')),
+  no_st TEXT, catatan TEXT, alasan TEXT, dibuat_oleh TEXT, dibuat_pada TEXT DEFAULT (datetime('now','localtime')),
+  diputuskan_oleh TEXT, diputuskan_pada TEXT, CHECK(selesai >= mulai));
+CREATE INDEX IF NOT EXISTS ix_jadwal_rencana ON jadwal(rencana_id);
+CREATE INDEX IF NOT EXISTS ix_jadwal_mulai ON jadwal(mulai, selesai);
+CREATE TABLE IF NOT EXISTS jadwal_petugas(
+  id INTEGER PRIMARY KEY, jadwal_id INTEGER NOT NULL REFERENCES jadwal(id) ON DELETE CASCADE,
+  pegawai_id INTEGER NOT NULL REFERENCES pegawai(id), UNIQUE(jadwal_id, pegawai_id));
+-- Baris-baris di bawah HANYA berisi jadwal aktif (Diusulkan/Disetujui/Terlaksana); dihapus saat Ditolak/Dibatalkan.
+-- (b) kegiatan yang sama di lokasi yang sama tidak boleh dua kali pada tanggal yang sama
+CREATE TABLE IF NOT EXISTS jadwal_hari(
+  id INTEGER PRIMARY KEY, jadwal_id INTEGER NOT NULL REFERENCES jadwal(id) ON DELETE CASCADE, tanggal TEXT NOT NULL,
+  baris_id INTEGER NOT NULL, lokasi_id INTEGER NOT NULL,
+  UNIQUE(baris_id, lokasi_id, tanggal));
+-- (a)+(c) satu pegawai tidak boleh punya dua penugasan pada tanggal yang sama, apa pun sumber dananya
+-- (sehingga uang harian ganda lintas DAU/BOK/BLUD mustahil)
+CREATE TABLE IF NOT EXISTS penugasan_hari(
+  id INTEGER PRIMARY KEY, jadwal_id INTEGER NOT NULL REFERENCES jadwal(id) ON DELETE CASCADE,
+  pegawai_id INTEGER NOT NULL REFERENCES pegawai(id), tanggal TEXT NOT NULL,
+  sumber_dana_id INTEGER NOT NULL REFERENCES sumber_dana(id), uang_harian INTEGER NOT NULL DEFAULT 1,
+  UNIQUE(pegawai_id, tanggal));
+-- (d) tanggal libur / cuti pegawai ditolak juga oleh database
+CREATE TRIGGER IF NOT EXISTS trg_penugasan_libur BEFORE INSERT ON penugasan_hari
+WHEN EXISTS(SELECT 1 FROM libur WHERE tanggal = NEW.tanggal)
+BEGIN SELECT RAISE(ABORT, 'LIBUR'); END;
+CREATE TRIGGER IF NOT EXISTS trg_penugasan_cuti BEFORE INSERT ON penugasan_hari
+WHEN EXISTS(SELECT 1 FROM cuti WHERE pegawai_id = NEW.pegawai_id AND NEW.tanggal BETWEEN mulai AND selesai)
+BEGIN SELECT RAISE(ABORT, 'CUTI'); END;
 """
 
 
@@ -133,6 +168,11 @@ def hitung_tingkat(eselon, golongan, status) -> str:
 def init_db() -> None:
     con = connect()
     con.executescript(SCHEMA)
+    # Migrasi database lama: kolom baru pada tabel pegawai
+    ada = {r["name"] for r in con.execute("PRAGMA table_info(pegawai)").fetchall()}
+    for kol in ("ruangan", "telepon"):
+        if kol not in ada:
+            con.execute(f"ALTER TABLE pegawai ADD COLUMN {kol} TEXT")
     if con.execute("SELECT COUNT(*) c FROM pegawai").fetchone()["c"] == 0:
         _seed(con)
     con.commit()

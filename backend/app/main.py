@@ -7,7 +7,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import bok, master, rencana
+from . import bok, jadwal, master, rencana
 from .calc import hitung
 from .core import Gagal, get_db, perlu_baca
 from .db import init_db
@@ -29,6 +29,7 @@ async def _valid(_, e: RequestValidationError):
 app.include_router(master.router)
 app.include_router(bok.router)
 app.include_router(rencana.router)
+app.include_router(jadwal.router)
 
 
 @app.post("/api/hitung-biaya")

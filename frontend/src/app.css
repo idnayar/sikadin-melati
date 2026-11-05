@@ -1,5 +1,5 @@
-:root{--bg:#f4f7f6;--card:#fff;--ink:#16302b;--muted:#5d726d;--line:#dbe5e2;--brand:#0f766e;--brand-d:#0b5c56;--warn:#b45309;--err:#b91c1c;--ok:#15803d;--r:10px}
-@media (prefers-color-scheme:dark){:root{--bg:#0f1716;--card:#16211f;--ink:#e6f0ee;--muted:#9bb0ab;--line:#26363a;--brand:#2dd4bf;--brand-d:#5eead4;--warn:#fbbf24;--err:#f87171;--ok:#4ade80}}
+:root{--bg:#f3f6f4;--card:#fff;--ink:#14281d;--muted:#5b6f64;--line:#dbe4de;--brand:#15803d;--brand-d:#14532d;--primary:#15803d;--primary-h:#166534;--bar:#14532d;--gold:#facc15;--warn:#b45309;--err:#b91c1c;--ok:#15803d;--r:10px}
+@media (prefers-color-scheme:dark){:root{--bg:#0d1511;--card:#15201a;--ink:#e6f0ea;--muted:#9bb0a4;--line:#24352b;--brand:#4ade80;--brand-d:#86efac;--primary:#15803d;--primary-h:#166534;--bar:#0b2e1a;--warn:#fbbf24;--err:#f87171;--ok:#4ade80}}
 *{box-sizing:border-box}
 [hidden]{display:none!important}
 body{margin:0;font:15px/1.45 system-ui,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--ink)}
@@ -16,11 +16,11 @@ input:focus,select:focus{outline:2px solid var(--brand);outline-offset:0}
 input[type=checkbox]{width:auto}
 .btn{font:inherit;border:1px solid var(--line);background:var(--card);color:var(--ink);padding:9px 14px;border-radius:8px;cursor:pointer;min-height:40px}
 .btn:hover{border-color:var(--brand)}
-.btn.primary{background:var(--brand);border-color:var(--brand);color:#fff}
-.btn.primary:hover{background:var(--brand-d)}
+.btn.primary{background:var(--primary);border-color:var(--primary);color:#fff}
+.btn.primary:hover{background:var(--primary-h)}
 .btn.danger{color:var(--err)}
 .btn.small{padding:5px 10px;min-height:32px;font-size:.88em}
-.top{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:10px;padding:8px 14px;background:var(--brand);color:#fff}
+.top{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:12px;padding:8px 16px;background:linear-gradient(90deg,var(--bar),#166534);color:#fff;border-bottom:3px solid var(--gold);box-shadow:0 2px 8px rgba(0,0,0,.15)}
 .top .btn{background:transparent;color:#fff;border-color:rgba(255,255,255,.5)}
 .brand{font-weight:700;letter-spacing:.06em}.brand small{font-weight:400;opacity:.85;letter-spacing:0;margin-left:6px}
 .spacer{flex:1}.who{font-size:.85em;opacity:.95}
@@ -29,7 +29,7 @@ input[type=checkbox]{width:auto}
 .nav{width:230px;flex:none;padding:12px;border-right:1px solid var(--line);background:var(--card);display:flex;flex-direction:column;gap:2px}
 .nav h4{margin:12px 8px 4px;font-size:.72em;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
 .nav a{display:block;padding:9px 10px;border-radius:8px;color:var(--ink);text-decoration:none;cursor:pointer}
-.nav a:hover{background:var(--bg)}.nav a.on{background:var(--brand);color:#fff}
+.nav a:hover{background:var(--bg)}.nav a.on{background:var(--primary);color:#fff}
 .main{flex:1;min-width:0;padding:18px}
 .bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:10px 0}
 .bar input,.bar select{width:auto;min-width:130px}
@@ -81,3 +81,71 @@ table.poa{font-size:.82em}table.poa td.num,table.poa th{white-space:nowrap}
 tr.grp td{background:var(--bg);font-weight:600}
 #dlgOk:disabled{opacity:.45;cursor:not-allowed}
 dialog:has(#prev){width:min(680px,96vw)}
+
+/* ---------- Identitas visual: Kabupaten Kapuas & UPT Puskesmas Melati ---------- */
+.login{display:grid;grid-template-columns:minmax(320px,46%) 1fr;place-items:stretch;padding:0;min-height:100vh}
+.hero{background:radial-gradient(120% 90% at 0% 0%,#166534 0%,#14532d 45%,#0b2e1a 100%);color:#ecfdf5;padding:48px 44px;display:flex;flex-direction:column;justify-content:center;gap:10px;position:relative;overflow:hidden}
+.hero::after{content:"";position:absolute;right:-90px;bottom:-90px;width:340px;height:340px;border-radius:50%;border:44px solid rgba(250,204,21,.10)}
+.hero-logos{display:flex;align-items:center;gap:18px;margin-bottom:12px}
+.hero .logo-lambang{height:96px;width:auto;filter:drop-shadow(0 4px 10px rgba(0,0,0,.35))}
+.hero .logo-pkm{height:92px;width:92px;border-radius:50%;object-fit:cover;box-shadow:0 0 0 3px rgba(250,204,21,.9),0 6px 16px rgba(0,0,0,.35)}
+.hero h1{margin:0;font-size:2.6rem;letter-spacing:.14em;color:#fff}
+.hero-sub{margin:0 0 14px;font-size:1.1rem;color:#bbf7d0}
+.hero-list{margin:0;padding:0;list-style:none;display:grid;gap:8px}
+.hero-list li{padding-left:26px;position:relative;color:#d1fae5}
+.hero-list li::before{content:"✓";position:absolute;left:0;color:var(--gold);font-weight:700}
+.hero-foot{margin-top:32px;padding-top:16px;border-top:1px solid rgba(255,255,255,.18);font-size:.9rem;color:#d1fae5;line-height:1.5}
+.hero-foot span{color:#a7f3d0;font-size:.82rem}
+.login-pane{display:grid;place-items:center;padding:24px;background:var(--bg)}
+.login-card{max-width:400px;box-shadow:0 10px 30px rgba(20,83,45,.12);padding:28px}
+.login-card h2{margin:0;color:var(--ink)}
+.login-mini{display:none;justify-content:center;gap:14px;align-items:center}
+.login-mini img{height:64px;width:auto}.login-mini img:last-child{width:64px;border-radius:50%;object-fit:cover}
+.login-note{margin:4px 0 0;font-size:.78rem;color:var(--muted);text-align:center}
+.top-logo{height:38px;width:auto;flex:none}.top-logo.round{width:38px;border-radius:50%;object-fit:cover;box-shadow:0 0 0 2px var(--gold)}
+.brand{display:grid;line-height:1.15;font-weight:800;letter-spacing:.1em;font-size:1.05rem;margin-left:4px}
+.brand small{font-weight:400;letter-spacing:0;font-size:.74rem;opacity:.88;margin:0}
+.nav{border-right:1px solid var(--line)}
+.nav h4{color:var(--brand-d)}
+.nav a{font-weight:500}
+th{background:#eef5f0}
+@media (prefers-color-scheme:dark){th{background:#1a2a21}.hero{background:radial-gradient(120% 90% at 0% 0%,#14532d,#0b2e1a 60%,#06190e)}}
+.card{box-shadow:0 1px 2px rgba(20,83,45,.06)}
+@media (max-width:860px){
+  .login{grid-template-columns:1fr}.hero{display:none}.login-mini{display:flex}
+  .login-pane{padding:20px 16px;align-items:start;padding-top:8vh}
+  .top-logo{height:32px}.top-logo.round{width:32px}.brand small{display:none}
+}
+
+/* ---------- Jadwal: kalender ---------- */
+.cal{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));border:1px solid var(--line);border-radius:var(--r);overflow:hidden;background:var(--card)}
+.cal-h{background:#eef5f0;color:var(--muted);font-weight:600;text-align:center;padding:7px 0;font-size:.82rem;border-bottom:1px solid var(--line)}
+.day{min-height:104px;padding:5px;border-right:1px solid var(--line);border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:3px;cursor:pointer;min-width:0}
+.day:nth-child(7n+7){border-right:0}.day.pad{background:var(--bg);cursor:default}
+.day:hover:not(.pad){background:rgba(21,128,61,.05)}
+.day.we{background:rgba(120,120,120,.05)}.day.lib{background:rgba(185,28,28,.07)}
+.day.today .dn{color:#fff}.day.today .dn::before{content:"";position:absolute}
+.dn{font-weight:600;font-size:.85rem;display:flex;gap:6px;align-items:baseline;flex-wrap:wrap}
+.day.today .dn{background:var(--primary);border-radius:6px;padding:0 6px;width:fit-content}
+.dw{display:none}.dn em{font-style:normal;font-weight:400;color:var(--err);font-size:.68rem;line-height:1.1}
+.chip{display:block;text-align:left;font:inherit;font-size:.72rem;line-height:1.25;border:0;border-radius:6px;padding:3px 6px;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.chip b{font-weight:700}
+.chip.st-Diusulkan{background:#fef3c7;color:#78350f}.chip.st-Disetujui{background:#dcfce7;color:#14532d}.chip.st-Terlaksana{background:#dbeafe;color:#1e3a8a}
+.chip.st-Dibatalkan,.chip.st-Ditolak{background:#fee2e2;color:#7f1d1d;text-decoration:line-through}.chip.cuti{background:#ede9fe;color:#4c1d95;cursor:default}
+.badge.st-Diusulkan{background:#fef3c7;color:#78350f}.badge.st-Dibatalkan{background:#e5e7eb;color:#374151}
+.legend{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:.8rem}.legend .chip{display:inline-block;cursor:default}.lib-key{background:rgba(185,28,28,.12);color:var(--err);padding:3px 8px;border-radius:6px;font-size:.72rem}
+.bar.filt select{min-width:0;flex:1 1 150px}
+.kvl{display:grid;grid-template-columns:110px 1fr;gap:6px 12px;font-size:.93rem}.kvl b{color:var(--muted);font-weight:600}
+.plist{max-height:230px;overflow:auto;border:1px solid var(--line);border-radius:8px;background:var(--bg)}
+.prow{display:flex;gap:8px;align-items:flex-start;padding:6px 10px;border-bottom:1px solid var(--line);cursor:pointer;color:var(--ink);font-size:.88rem}
+.prow:last-child{border-bottom:0}.prow.on{background:rgba(21,128,61,.10)}.prow input{margin-top:3px;flex:none}
+.gal{border-left:3px solid var(--err);padding-left:8px;margin:6px 0}.gal p{margin:2px 0}
+.peng{font-size:.82rem;margin:4px 0;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.chipb{font:inherit;font-size:.8rem;border:1px solid var(--primary);background:transparent;color:var(--primary);border-radius:99px;padding:2px 10px;cursor:pointer}
+.chipb:hover{background:var(--primary);color:#fff}.chipb small{opacity:.75}
+p.okc{color:var(--ok);margin:2px 0}
+@media (prefers-color-scheme:dark){.cal-h{background:#1a2a21}.chip.st-Diusulkan{background:#5b3a0a;color:#fde68a}.chip.st-Disetujui{background:#14532d;color:#bbf7d0}.chip.st-Terlaksana{background:#1e3a8a;color:#dbeafe}.chip.cuti{background:#3b2a6b;color:#ddd6fe}}
+@media (max-width:760px){
+  .cal{display:block}.cal-h,.day.pad,.day.kosong{display:none}
+  .day{min-height:0;border-right:0;flex-direction:column}.dw{display:inline}.chip{white-space:normal}
+}

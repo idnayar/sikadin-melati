@@ -29,8 +29,9 @@ RES = {
         "fields": [F("nama", "Nama", req=1), F("nip", "NIP"), F("pangkat", "Pangkat"),
                    F("golongan", "Golongan (mis. III/b, IV/a)"), F("jabatan", "Jabatan"), F("eselon", "Eselon (III/IV/kosong)"),
                    F("status", "Status", "select", req=1, opts=["ASN", "PPPK", "Non ASN"], **{"def": "ASN"}),
+                   F("ruangan", "Ruangan / unit"), F("telepon", "Telepon"),
                    F("program", "Program"), F("tingkat", "Tingkat biaya (otomatis)", ro=1), AKTIF],
-        "list": ["nama", "nip", "golongan", "jabatan", "status", "program", "tingkat", "aktif"],
+        "list": ["nama", "nip", "jabatan", "ruangan", "golongan", "status", "tingkat", "aktif"],
     },
     "sumber_dana": {
         "judul": "Sumber Dana", "tabel": "sumber_dana", "urut": "kode", "unik": ["kode"],
@@ -203,9 +204,35 @@ def normalisasi(r, body, lama=None):
                 raise Gagal(f"{f['label']} tidak valid.")
         out[k] = v
     if r["tabel"] == "pegawai":
+        _rapikan_pegawai(out)
         m = {**(lama or {}), **out}
         out["tingkat"] = hitung_tingkat(m.get("eselon"), m.get("golongan"), m.get("status"))
     return out
+
+
+_KECIL = {"dan", "di", "ke", "dalam"}
+
+
+def _rapikan_pegawai(o: dict) -> None:
+    """Rapikan isian dari Excel: spasi ganda/baris baru, '/' atau ',,' nyasar, huruf kapital ruangan, telepon '-'."""
+    import re
+    for k in ("nip", "telepon"):
+        if isinstance(o.get(k), (int, float)):
+            o[k] = str(int(o[k]))
+    for k in ("nama", "jabatan", "pangkat", "golongan"):
+        if isinstance(o.get(k), str):
+            v = re.sub(r"\s+", " ", o[k]).strip()
+            if k == "nama":
+                v = re.sub(r"\s*/+$", "", v)
+                v = re.sub(r",\s*,+", ",", v)
+            o[k] = v or None
+    if isinstance(o.get("ruangan"), str):
+        ws = []
+        for w in re.sub(r"\s+", " ", o["ruangan"]).strip().split(" "):
+            ws.append(w if w.isupper() or not w else (w.lower() if w.lower() in _KECIL else w[:1].upper() + w[1:].lower()))
+        o["ruangan"] = " ".join(ws) or None
+    if isinstance(o.get("telepon"), str) and o["telepon"].strip() in ("", "-", "–"):
+        o["telepon"] = None
 
 
 def bersih(row):
@@ -334,7 +361,7 @@ def baca_xlsx(data: bytes) -> list[dict]:
     rows = list(wb[wb.sheetnames[0]].iter_rows(values_only=True))
     if not rows:
         return []
-    head = [str(h).strip() if h is not None else "" for h in rows[0]]
+    head = [str(h).strip().lower() if h is not None else "" for h in rows[0]]  # judul kolom tidak peka huruf besar/kecil
     out = []
     for row in rows[1:]:
         if all(c is None or c == "" for c in row):

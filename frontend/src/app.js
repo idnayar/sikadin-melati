@@ -52,6 +52,7 @@ function dialog(judul, bodyHtml, onSave, saveLabel = 'Simpan') {
 // ---------- navigasi ----------
 const MENU = [
   ['Anggaran', [['bok', 'Pagu Anggaran BOK'], ['rencana', 'Perencanaan (RPK/POA)']]],
+  ['Dinas Luar', [['jadwal', 'Jadwal Dinas Luar']]],
   ['Master Data', [['pegawai', 'Pegawai'], ['sumber_dana', 'Sumber Dana'], ['pagu', 'Pagu DAU / BLUD'], ['lokasi', 'Lokasi Tujuan'], ['tarif', 'Tarif Perbup'], ['pejabat', 'Pejabat'], ['libur', 'Hari Libur'], ['cuti', 'Cuti Pegawai'], ['pengaturan', 'Pengaturan & Kop']]],
   ['Alat', [['kalkulator', 'Kalkulator Biaya'], ['riwayat', 'Riwayat Perubahan'], ['data', 'Backup & Ekspor']]],
   ['Sistem', [['users', 'Pengguna']]],
@@ -59,7 +60,7 @@ const MENU = [
 function buildNav() {
   let h = '';
   for (const [g, items] of MENU) {
-    const vis = items.filter(([k]) => S.meta[k] || (['kalkulator', 'data', 'bok', 'rencana'].includes(k) && S.bisaBaca) || (k === 'riwayat' && S.bisaTulis));
+    const vis = items.filter(([k]) => S.meta[k] || (['kalkulator', 'data', 'bok', 'rencana', 'jadwal'].includes(k) && S.bisaBaca) || (k === 'riwayat' && S.bisaTulis));
     if (!vis.length) continue;
     h += `<h4>${g}</h4>` + vis.map(([k, l]) => `<a data-k="${k}">${l}</a>`).join('');
   }
@@ -75,6 +76,7 @@ async function route() {
     if (!S.bisaBaca) m.innerHTML = `<div class="card"><h2>Selamat datang, ${esc(S.user.nama)}</h2><p class="muted">Jadwal, Surat Tugas, dan rincian uang Anda akan tampil di sini pada tahap berikutnya.</p></div>`;
     else if (k === 'bok') await viewBok(m);
     else if (k === 'rencana') await viewRencana(m);
+    else if (k === 'jadwal') await viewJadwal(m);
     else if (k === 'kalkulator') await viewKalkulator(m);
     else if (k === 'riwayat') await viewRiwayat(m);
     else if (k === 'data') viewData(m);
@@ -384,6 +386,164 @@ async function viewRencana(m) {
       else if (a === 'hapus') dialog('Hapus rencana?', `<p>${esc(r.kegiatan)} (${rp(r.estimasi)}) akan dihapus. Tercatat di riwayat.</p>`, async () => { await api('/api/rencana/' + id, { method: 'DELETE' }); toast('Dihapus.'); await reload(); }, 'Hapus');
     } catch (x) { toast(x.message, 1); }
   };
+}
+
+// ---------- Jadwal Dinas Luar (kalender + tabel + anti-doubling) ----------
+const pad = n => String(n).padStart(2, '0');
+const isoD = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const tglID = s => s ? s.slice(8, 10) + '-' + s.slice(5, 7) + '-' + s.slice(0, 4) : '';
+const HARI = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'];
+S.jwYM = null; S.jwTab = 'kalender'; S.jwF = { pegawai_id: '', lokasi_id: '', program: '', sumber_dana_id: '', status: '' };
+
+async function viewJadwal(m) {
+  const rw = S.user.role !== 'pegawai', kepala = S.user.role === 'kepala';
+  await refs();
+  if (!S.jwYM) { const n = new Date(); S.jwYM = `${n.getFullYear()}-${pad(n.getMonth() + 1)}`; }
+  const [Y, M] = S.jwYM.split('-').map(Number), F = S.jwF;
+  const dari = `${Y}-${pad(M)}-01`, jmlHari = new Date(Y, M, 0).getDate(), sampai = `${Y}-${pad(M)}-${pad(jmlHari)}`;
+  const qs = new URLSearchParams({ dari, sampai }); Object.entries(F).forEach(([k, v]) => v && qs.set(k, v));
+  const [list, libur, cuti] = await Promise.all([api('/api/jadwal?' + qs), api('/api/data/libur'), api('/api/data/cuti')]);
+  const liburMap = Object.fromEntries(libur.map(x => [x.tanggal, x.keterangan || 'Libur']));
+  const pegAktif = S.refs.pegawai.filter(p => p.aktif);
+  const unit = [...new Set(pegAktif.flatMap(p => [p.program, p.ruangan]).filter(Boolean))].sort();
+  const bdg = s => `<span class="badge st-${s}">${s}</span>`;
+  const namaSingkat = n => n.split(',')[0];
+
+  const aksi = j => {
+    const a = [];
+    if (j.status === 'Diusulkan' && j.bisa_ubah) a.push(['Ubah', () => formJadwal(j), '']);
+    if (j.status === 'Diusulkan' && kepala) a.push(['Setujui', () => ubahStatus(j, 'Disetujui'), 'primary'], ['Tolak', () => alasanStatus(j, 'Ditolak'), 'danger']);
+    if ((j.status === 'Diusulkan' && j.bisa_ubah) || (j.status === 'Disetujui' && kepala)) a.push(['Batalkan', () => alasanStatus(j, 'Dibatalkan'), 'danger']);
+    return a;
+  };
+  async function ubahStatus(j, ke, alasan) { await api(`/api/jadwal/${j.id}/status`, { method: 'POST', body: { ke, alasan } }); toast('Jadwal ' + ke.toLowerCase() + '.'); await reload(); }
+  const alasanStatus = (j, ke) => dialog(ke + ' jadwal', '<label>Alasan<input name="alasan" required></label>', async d => { await ubahStatus(j, ke, d.alasan); }, ke === 'Ditolak' ? 'Tolak' : 'Batalkan');
+  const detail = j => {
+    dialog('Detail Jadwal #' + j.id, `<div class="kvl"><b>Kegiatan</b><span>${esc(j.kegiatan)}</span><b>Tanggal</b><span>${tglID(j.mulai)}${j.selesai !== j.mulai ? ' s.d. ' + tglID(j.selesai) : ''}</span>
+      <b>Lokasi</b><span>${esc(j.lokasi)}</span><b>Sumber dana</b><span>${esc(j.dana)}</span><b>Durasi</b><span>${j.durasi === 'le8' ? '≤ 8 jam (transport lokal)' : '> 8 jam'}</span>
+      <b>Status</b><span>${bdg(j.status)}</span><b>No. ST</b><span>${esc(j.no_st || 'belum terbit')}</span>
+      <b>Petugas</b><span>${j.petugas.map(p => `${esc(namaSingkat(p.nama))} <span class="muted">(${esc(p.ruangan || p.program || 'Tk. ' + p.tingkat)})</span>`).join('<br>')}</span>
+      ${j.alasan ? `<b>Alasan</b><span>${esc(j.alasan)}</span>` : ''}${j.catatan ? `<b>Catatan</b><span>${esc(j.catatan)}</span>` : ''}</div><div class="acts" id="dAksi"></div>`);
+    const box = $('#dAksi'); aksi(j).forEach(([l, fn, c]) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'btn small ' + c; b.textContent = l; b.onclick = () => { $('#dlg').close(); fn(); }; box.appendChild(b); });
+  };
+
+  // ----- kalender -----
+  const hariKal = () => {
+    const first = new Date(Y, M - 1, 1), off = (first.getDay() + 6) % 7, today = isoD(new Date());
+    let h = HARI.map(x => `<div class="cal-h">${x}</div>`).join('');
+    for (let i = 0; i < off; i++) h += '<div class="day pad"></div>';
+    for (let d = 1; d <= jmlHari; d++) {
+      const iso = `${Y}-${pad(M)}-${pad(d)}`, wd = (off + d - 1) % 7;
+      const items = list.filter(j => j.mulai <= iso && j.selesai >= iso);
+      const cutiAda = F.pegawai_id ? cuti.find(c => c.pegawai_id === Number(F.pegawai_id) && c.mulai <= iso && c.selesai >= iso) : null;
+      h += `<div class="day ${wd >= 5 ? 'we' : ''} ${liburMap[iso] ? 'lib' : ''} ${iso === today ? 'today' : ''} ${items.length || liburMap[iso] || cutiAda ? '' : 'kosong'}" data-d="${iso}">
+        <div class="dn"><span class="dw">${HARI[wd]}, </span>${d}${liburMap[iso] ? `<em title="${esc(liburMap[iso])}">${esc(liburMap[iso].slice(0, 22))}</em>` : ''}</div>
+        ${cutiAda ? `<div class="chip cuti">Cuti: ${esc(cutiAda.keterangan || '')}</div>` : ''}
+        ${items.map(j => `<button class="chip st-${j.status}" data-j="${j.id}" title="${esc(j.kegiatan)} — ${esc(j.lokasi)}"><b>${esc(j.lokasi.replace(/^Kelurahan /, 'Kel. ').slice(0, 20))}</b> ${esc(j.kegiatan.slice(0, 34))} · ${j.petugas.length} org</button>`).join('')}</div>`;
+    }
+    return `<div class="cal">${h}</div>`;
+  };
+  const tabel = () => `<div class="tbl-wrap"><table><thead><tr><th>Tanggal</th><th>Kegiatan</th><th>Lokasi</th><th>Petugas</th><th>Dana</th><th>Status</th><th></th></tr></thead><tbody>
+    ${list.map(j => `<tr><td style="white-space:nowrap">${tglID(j.mulai)}${j.selesai !== j.mulai ? '<br>s.d. ' + tglID(j.selesai) : ''}</td><td><b>${esc(j.kegiatan)}</b>${j.no_st ? `<br><span class="muted">ST ${esc(j.no_st)}</span>` : ''}</td>
+      <td>${esc(j.lokasi)}</td><td>${j.petugas.map(p => esc(namaSingkat(p.nama))).join(', ')}</td><td>${esc(j.dana)}</td><td>${bdg(j.status)}</td>
+      <td style="white-space:nowrap"><button class="btn small" data-det="${j.id}">Detail</button></td></tr>`).join('') || '<tr><td colspan="7" class="muted">Tidak ada jadwal pada filter ini.</td></tr>'}</tbody></table></div>`;
+
+  const opt = (v, l, sel) => `<option value="${esc(v)}" ${String(sel) === String(v) ? 'selected' : ''}>${esc(l)}</option>`;
+  m.innerHTML = `<h2>Jadwal Dinas Luar</h2>
+  <p class="muted">Jadwal dibuat dari rencana yang sudah disetujui. Sistem menolak bentrok petugas, kegiatan ganda, tanggal libur/cuti, dan uang harian ganda lintas sumber dana.</p>
+  <div class="bar"><button class="btn" id="jPrev" aria-label="Bulan sebelumnya">‹</button><b style="min-width:150px;text-align:center">${BLN[M - 1]} ${Y}</b><button class="btn" id="jNext" aria-label="Bulan berikutnya">›</button><button class="btn small" id="jNow">Bulan ini</button>
+   <span style="flex:1"></span>${rw ? '<button class="btn primary" id="jAdd">+ Jadwal</button>' : ''}</div>
+  <div class="bar filt">
+   <select id="fPeg"><option value="">Semua pegawai</option>${pegAktif.map(p => opt(p.id, namaSingkat(p.nama), F.pegawai_id)).join('')}</select>
+   <select id="fLok"><option value="">Semua lokasi</option>${S.refs.lokasi.filter(l => l.aktif).map(l => opt(l.id, l.nama, F.lokasi_id)).join('')}</select>
+   <select id="fProg"><option value="">Semua program/ruangan</option>${unit.map(u => opt(u, u, F.program)).join('')}</select>
+   <select id="fDana"><option value="">Semua sumber dana</option>${S.refs.sumber_dana.map(s => opt(s.id, s.kode, F.sumber_dana_id)).join('')}</select>
+   <select id="fSt"><option value="">Aktif (semua)</option>${['Diusulkan', 'Disetujui', 'Terlaksana', 'Dibatalkan', 'Ditolak'].map(s => opt(s, s, F.status)).join('')}</select></div>
+  <div class="tabs"><button class="tab ${S.jwTab === 'kalender' ? 'on' : ''}" data-tab="kalender">Kalender</button><button class="tab ${S.jwTab === 'tabel' ? 'on' : ''}" data-tab="tabel">Tabel</button>
+   <span class="muted" style="margin-left:auto;align-self:center">${list.length} jadwal</span></div>
+  ${S.jwTab === 'kalender' ? hariKal() : tabel()}
+  <p class="legend"><span class="chip st-Diusulkan">Diusulkan</span> <span class="chip st-Disetujui">Disetujui</span> <span class="chip st-Terlaksana">Terlaksana</span> <span class="chip cuti">Cuti</span> <span class="lib-key">Libur</span></p>`;
+
+  const reload = () => viewJadwal(m);
+  const geser = n => { const d = new Date(Y, M - 1 + n, 1); S.jwYM = `${d.getFullYear()}-${pad(d.getMonth() + 1)}`; reload(); };
+  $('#jPrev').onclick = () => geser(-1); $('#jNext').onclick = () => geser(1);
+  $('#jNow').onclick = () => { S.jwYM = null; reload(); };
+  [['fPeg', 'pegawai_id'], ['fLok', 'lokasi_id'], ['fProg', 'program'], ['fDana', 'sumber_dana_id'], ['fSt', 'status']].forEach(([id, k]) => $('#' + id).onchange = e => { S.jwF[k] = e.target.value; reload(); });
+  m.querySelectorAll('[data-tab]').forEach(t => t.onclick = () => { S.jwTab = t.dataset.tab; reload(); });
+  if ($('#jAdd')) $('#jAdd').onclick = () => formJadwal(null, dari);
+  m.onclick = e => {
+    const c = e.target.closest('[data-j],[data-det]'); if (c) { const j = list.find(x => x.id === Number(c.dataset.j || c.dataset.det)); if (j) detail(j); return; }
+    const dEl = e.target.closest('.day[data-d]'); if (dEl && rw && !e.target.closest('.chip')) formJadwal(null, dEl.dataset.d);
+  };
+
+  // ----- form jadwal + pengecekan bentrok real-time -----
+  async function formJadwal(j, tglAwal) {
+    const siap = await api(`/api/jadwal/rencana-siap?tahun=${Y}`);
+    if (!j && !siap.length) return toast(`Belum ada rencana Disetujui yang masih bisa dijadwalkan pada tahun ${Y}. Setujui rencana di menu Perencanaan.`, 1);
+    const pilih = new Set((j?.petugas || []).map(p => p.id)); let selesaiManual = !!j;
+    const lok = S.refs.lokasi.filter(l => l.aktif);
+    const rencOpt = j ? `<option value="${j.rencana_id}">${esc(j.kegiatan)}</option>` : '<option value="">— pilih rencana yang sudah disetujui —</option>' + siap.map(r => `<option value="${r.id}">${BLN[r.bulan - 1].slice(0, 3)} · ${esc(r.kegiatan.slice(0, 70))} — ${r.terjadwal}/${r.frekuensi} terjadwal</option>`).join('');
+    dialog(j ? 'Ubah Jadwal #' + j.id : 'Tambah Jadwal Dinas Luar', `
+      <label>Rencana kegiatan<select name="rencana_id" ${j ? 'disabled' : 'required'}>${rencOpt}</select></label>
+      <div class="grid2"><label>Tanggal mulai<input name="mulai" type="date" value="${j ? j.mulai : tglAwal || ''}" required></label>
+        <label>Tanggal selesai<input name="selesai" type="date" value="${j ? j.selesai : tglAwal || ''}" required></label>
+        <label>Lokasi tujuan<select name="lokasi_id"><option value="">— pilih —</option>${lok.map(l => `<option value="${l.id}" ${j?.lokasi_id === l.id ? 'selected' : ''}>${esc(l.nama)}</option>`).join('')}</select></label>
+        <label>Durasi (dalam kota)<select name="durasi"><option value="gt8" ${j?.durasi !== 'le8' ? 'selected' : ''}>Lebih dari 8 jam</option><option value="le8" ${j?.durasi === 'le8' ? 'selected' : ''}>Sampai dengan 8 jam</option></select></label></div>
+      <div><div class="bar" style="margin:4px 0"><b>Petugas</b> <span class="muted" id="pCount"></span><span style="flex:1"></span>
+        <input id="pCari" type="search" placeholder="Cari nama/ruangan…" style="min-width:150px"><button type="button" class="btn small" id="pAuto">⚙ Bagi petugas otomatis</button></div>
+        <div class="plist" id="pList"></div></div>
+      <label>Catatan<input name="catatan" value="${esc(j?.catatan ?? '')}"></label>
+      <div id="cek" class="card prev">Lengkapi rencana, tanggal, dan petugas untuk memeriksa bentrok.</div>`,
+      async d => {
+        const body = { ...d, rencana_id: Number(j ? j.rencana_id : d.rencana_id), lokasi_id: Number(d.lokasi_id) || null, petugas: [...pilih], id: j?.id };
+        const res = await api(j ? `/api/jadwal/${j.id}` : '/api/jadwal', { method: j ? 'PUT' : 'POST', body });
+        toast('Jadwal diusulkan.' + (res.peringatan?.length ? ' ⚠ ' + res.peringatan[0] : '')); await reload();
+      });
+    const f = $('#dlgForm'), ok = $('#dlgOk'); let tm;
+    const rencanaTerpilih = () => j ? { jumlah_petugas: j.rencana_petugas, jumlah_hari: 1 } : siap.find(r => r.id === Number(f.elements.rencana_id.value));
+    const gambarDaftar = () => {
+      const q = $('#pCari').value.toLowerCase();
+      $('#pList').innerHTML = pegAktif.filter(p => !/^kepala puskesmas/i.test(p.jabatan || '')).filter(p => pilih.has(p.id) || !q || `${p.nama} ${p.ruangan} ${p.jabatan}`.toLowerCase().includes(q))
+        .sort((a, b) => (pilih.has(b.id) - pilih.has(a.id)) || a.nama.localeCompare(b.nama)).map(p => `<label class="prow ${pilih.has(p.id) ? 'on' : ''}"><input type="checkbox" data-id="${p.id}" ${pilih.has(p.id) ? 'checked' : ''}>
+         <span><b>${esc(namaSingkat(p.nama))}</b> <span class="muted">${esc(p.ruangan || p.program || '')} · ${esc((p.jabatan || '').slice(0, 30))}</span></span></label>`).join('');
+      const r = rencanaTerpilih(); $('#pCount').textContent = `(${pilih.size} dipilih${r ? ' dari ' + r.jumlah_petugas + ' direncanakan' : ''})`;
+    };
+    const periksa = async () => {
+      const d = Object.fromEntries(new FormData(f)); if (j) d.rencana_id = j.rencana_id;
+      if (!d.rencana_id || !d.mulai || !d.selesai || !pilih.size) { ok.disabled = true; return; }
+      const a = await api('/api/jadwal/periksa', { method: 'POST', body: { ...d, rencana_id: Number(d.rencana_id), lokasi_id: Number(d.lokasi_id) || null, petugas: [...pilih], id: j?.id } });
+      $('#cek').innerHTML = (a.ok ? `<p class="okc">✓ Tidak ada bentrok. ${a.jumlah_hari ?? ''} hari, ${pilih.size} petugas.</p>` : '')
+        + a.galat.map((g, i) => `<div class="gal"><p class="err">✖ ${esc(g.pesan)}</p>${g.pengganti?.length ? `<div class="peng">Petugas kosong pada tanggal itu: ${g.pengganti.map(x => `<button type="button" class="chipb" data-ganti="${g.pegawai_id ?? ''}" data-baru="${x.id}">${esc(namaSingkat(x.nama))} <small>· ${x.beban_bulan ?? 0} hr bln ini</small></button>`).join(' ')}</div>` : ''}</div>`).join('')
+        + a.peringatan.map(p => `<p class="warn">⚠ ${esc(p)}</p>`).join('');
+      ok.disabled = !a.ok;
+    };
+    const tunda = (ms = 250) => { clearTimeout(tm); tm = setTimeout(periksa, ms); };
+    ok.disabled = true; gambarDaftar(); periksa();
+    f.addEventListener('change', e => {
+      if (e.target.name === 'rencana_id') {
+        const r = siap.find(x => x.id === Number(e.target.value));
+        if (r) { if (r.lokasi_id) f.elements.lokasi_id.value = r.lokasi_id; f.elements.durasi.value = r.durasi || 'gt8'; if (f.elements.mulai.value && !selesaiManual) f.elements.selesai.value = isoD(new Date(new Date(f.elements.mulai.value).getTime() + (r.jumlah_hari - 1) * 864e5)); gambarDaftar(); }
+      }
+      if (e.target.name === 'mulai' && !selesaiManual) { const r = rencanaTerpilih(); f.elements.selesai.value = isoD(new Date(new Date(e.target.value).getTime() + ((r?.jumlah_hari || 1) - 1) * 864e5)); }
+      if (e.target.name === 'selesai') selesaiManual = true;
+      if (e.target.dataset.id) { const id = Number(e.target.dataset.id); e.target.checked ? pilih.add(id) : pilih.delete(id); gambarDaftar(); }
+      tunda(50);
+    });
+    f.addEventListener('input', e => { if (e.target.id === 'pCari') gambarDaftar(); else tunda(); });
+    f.addEventListener('click', e => {
+      const g = e.target.closest('[data-baru]');
+      if (g) { if (g.dataset.ganti) pilih.delete(Number(g.dataset.ganti)); pilih.add(Number(g.dataset.baru)); gambarDaftar(); tunda(30); }
+    });
+    $('#pAuto').onclick = async () => {
+      const r = rencanaTerpilih(); if (!r) return toast('Pilih rencana dulu.', 1);
+      if (!f.elements.mulai.value || !f.elements.selesai.value) return toast('Isi tanggal dulu.', 1);
+      try {
+        const s = await api('/api/jadwal/saran', { method: 'POST', body: { mulai: f.elements.mulai.value, selesai: f.elements.selesai.value, jumlah: r.jumlah_petugas, id: j?.id } });
+        pilih.clear(); s.dipilih.forEach(p => pilih.add(p.id)); gambarDaftar(); tunda(30);
+        toast(s.kurang ? `Hanya ${s.dipilih.length} petugas kosong (kurang ${s.kurang}).` : `Dipilih ${s.dipilih.length} petugas dengan beban terendah.`, !!s.kurang);
+      } catch (x) { toast(x.message, 1); }
+    };
+  }
 }
 
 // ---------- kalkulator ----------
