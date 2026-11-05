@@ -83,16 +83,24 @@ Dibuat dari **jadwal yang sudah disetujui** (menu Surat Tugas & SPD). Satu ST + 
 
 ## Surat dalam satu modul, Kepala opsional (Tahap 4–5 disederhanakan)
 - Menu **Surat** memuat tiga tab: *Surat Tugas & SPD*, *Siap diterbitkan* (dengan **terbit massal** berisian bawaan), dan *Nomor surat umum & kode*.
-- **Persetujuan Kepala opsional** (pengaturan `kepala_wajib`, bawaan 0). Pembuat surat (Pengelola Program/Bendahara/Kepala; BLUD hanya Kepala + Bendahara BLUD) menyetujui rencana & jadwalnya sendiri dan mengotorisasi ST saat menerbitkan; semuanya tercatat di riwayat. Set `kepala_wajib` = 1 untuk mewajibkan persetujuan Kepala.
+- **Persetujuan Kepala opsional** (pengaturan `kepala_wajib`, bawaan 0; bila 1, penyetuju = Kepala + Pembuat Surat). Pembuat surat (Pengelola Program/Bendahara/Kepala; BLUD hanya Kepala + Bendahara BLUD) menyetujui rencana & jadwalnya sendiri dan mengotorisasi ST saat menerbitkan; semuanya tercatat di riwayat. Set `kepala_wajib` = 1 untuk mewajibkan persetujuan Kepala.
 - **ST terbit → SPJ otomatis** (satu draft per petugas) dan tersambung ke realisasi belanja: daftar ST menampilkan status SPJ & nilai dibayar; pembatalan ST menghapus SPJ draft dan **ditolak** bila ada SPJ diajukan/dibayar.
 
 ## Rekap perjalanan dinas
 Menu *Rekap Perjalanan Dinas*: per nama, tempat, waktu, tujuan, biaya (SPD) dan realisasi (SPJ dibayar) — setahun & per bulan; filter bulan/sumber/pegawai/tempat/teks; ekspor PDF/DOCX/XLSX. Pegawai hanya melihat miliknya; BLUD tetap terbatas.
 
 ## Pembuat Surat Tugas, foto bukti SPJ, penyelesaian di Srikandi
-- Peran **pembuat_surat**: hak sumber seperti Pengelola Program (BOK/DAU; BLUD tidak), menu ringkas (Dashboard, Jadwal, Surat, Rekap, Kalkulator), tidak dapat mengubah RAB, memverifikasi/membayar SPJ, atau membuka akuntansi. Akun `pembuat_surat` ditambahkan otomatis (ganti nama & sandi).
+- Peran **pembuat_surat** (hak istimewa): membuat surat sesuai pagu **BOK, DAU, dan BLUD**, dari rencana/jadwal sendiri atau **usulan Pengelola Program**, dan **menyetujuinya** (selalu boleh, termasuk saat `kepala_wajib`=1; jadwal Diusulkan otomatis disetujui saat ST terbit). Hak BLUD dibatasi pada alur surat (RAB baca, rencana, jadwal, ST): **tanpa data uang BLUD** (SPJ, realisasi, serapan, riwayat, laporan) — lihat `akses_uang` di `core.py`. Tidak dapat mengubah RAB/pagu atau memverifikasi/membayar SPJ. Menu: Dashboard, Perencanaan, Jadwal, Surat, Rekap, Kalkulator. Akun `pembuat_surat` ditambahkan otomatis (ganti nama & sandi).
 - **Alur ST sampai selesai:** terbit → unduh DOCX → *Tandai sudah diunggah ke Srikandi* → *Unggah PDF hasil Srikandi* (nomor naskah dibaca otomatis dari PDF; pengguna mengonfirmasi) → progres **Selesai di Srikandi** (3/3). PDF final disimpan di database (`st_final`), boleh diganti (tercatat di riwayat).
 - **Foto bukti SPJ:** unggah dari kamera/galeri (dikecilkan di browser), maks. 8 berkas × 4 MB per SPJ, hanya JPG/PNG/WebP/PDF (diperiksa isinya), terkunci setelah diajukan (juga di DB), ikut sebagai lampiran PDF SPJ, ikut backup & pemulihan.
+
+## Buku Kas Umum (BKU) — format Puskesmas Melati
+Menu *Buku Kas Umum*: empat buku, **bulanan dan tahunan**, ekspor PDF/DOCX/XLSX, formatnya mengikuti contoh BKU Agustus 2026:
+- **BOK** dan **DAU** — BKU Bendahara Pengeluaran Pembantu (No Urut · Tanggal · Kode Rekening/Bukti · Uraian · Penerimaan · Pengeluaran; Saldo Awal; jumlah bulan ini / s.d. bulan lalu / sisa; tanda tangan KPA + Bendahara Pembantu).
+- **Retribusi** — BKU Bendahara Penerimaan (judul Pemerintah Kabupaten, kolom bernomor, sisa kas NIHIL, baris Qris dengan penerimaan = pengeluaran, setor ke BLUD).
+- **BLUD** — Buku Kas Bendahara Dana BLUD (Pendapatan · Belanja · Saldo; no. bukti `n/BKU/D|K`; rincian saldo: Bank per JKN Kapitasi/Non Kapitasi/Pelayanan Umum, Kas JKN, Kas Lain-lain, Panjar).
+Setiap baris = satu jurnal kas. **Pembayaran SPJ otomatis masuk** (bukti `{urut}/PKM.M/{tahun}`, uraian "Pembayaran … An. …"; format di pengaturan `format_bukti_spj`). Transaksi lain dicatat lewat *+ Catat transaksi* (penerimaan, pengeluaran, setor/pindah antar buku, terima-lalu-teruskan seperti Qris). Saldo awal kas diisi per buku (BLUD dapat dirinci). Akses: Kepala semua; Bendahara BOK/DAU; Bendahara BLUD BLUD & Retribusi (BOK/DAU hanya baca). Akun kas: 1.1.1.01 BOK, 1.1.1.04 DAU, 1.1.1.02 BLUD, 1.1.1.03 Retribusi. Pejabat BKU di menu Pejabat.
+- **Ekspor Srikandi**: DOCX (templat resmi) **dan PDF** (ST + SPD memuat kode `${nomor_naskah}`, `${ttd}`, `${nama_pengirim}`).
 
 ## Dashboard (Tahap 7)
 Beranda per peran (`/api/dashboard`): kartu pagu/realisasi/proses/sisa/serapan, daftar **pekerjaan yang menunggu** (rencana & jadwal belum disetujui, jadwal siap ST, ST belum bernomor Srikandi, SPJ untuk dilengkapi/diverifikasi/dibayar — tiap tombol langsung membuka menunya), peringatan (baris RAB ≥ 90% atau melebihi pagu, pegawai melebihi batas hari dinas, serapan jauh di bawah target), serapan per sumber, grafik rencana vs realisasi per bulan, jadwal 14 hari ke depan, ringkasan keuangan (hanya Kepala + Bendahara BLUD). Pegawai melihat perjalanan mendatang dan status SPJ miliknya. Semua angka mengikuti hak akses sumber dana (BLUD terisolasi). Tahun ST/SPJ mengikuti **tahun anggaran jadwal**, bukan tahun tanggal surat.

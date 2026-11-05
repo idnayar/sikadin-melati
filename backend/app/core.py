@@ -66,7 +66,8 @@ def akses_sumber(u: dict, kode: str, aksi: str = "baca") -> bool:
     if role == "kepala":
         return True
     if kode == "BLUD":
-        return role == "bendahara_blud"
+        # Pembuat surat: boleh membaca RAB/rencana BLUD dan membuat/menyetujui rencana-jadwal-ST BLUD, tetapi BUKAN data uang (lihat akses_uang).
+        return role == "bendahara_blud" or (role == "pembuat_surat" and aksi in ("baca", "rencana"))
     if role == "bendahara":
         return True
     if role in ("program", "pembuat_surat"):
@@ -74,6 +75,21 @@ def akses_sumber(u: dict, kode: str, aksi: str = "baca") -> bool:
     if role == "bendahara_blud":
         return aksi == "baca"
     return False
+
+
+def akses_uang(u: dict, kode: str, aksi: str = "baca") -> bool:
+    """Akses data KEUANGAN (SPJ, realisasi, serapan, riwayat): Pembuat Surat tidak mendapat data uang BLUD."""
+    return akses_sumber(u, kode, aksi) and not (u["role"] == "pembuat_surat" and str(kode).upper() == "BLUD")
+
+
+def cek_uang(u: dict, kode: str, aksi: str = "baca") -> None:
+    if not akses_uang(u, kode, aksi):
+        raise Gagal(f"Anda tidak berwenang atas data keuangan {kode}.", 403)
+
+
+def boleh_setuju(db, u: dict) -> bool:
+    """Penyetuju rencana/jadwal: Kepala dan Pembuat Surat selalu; peran lain hanya bila persetujuan Kepala tidak diwajibkan."""
+    return u["role"] in ("kepala", "pembuat_surat") or not kepala_wajib(db)
 
 
 def cek_sumber(u: dict, kode: str, aksi: str = "baca") -> None:

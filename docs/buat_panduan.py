@@ -207,9 +207,9 @@ def isi():
                  ["<b>Bendahara</b> (BOK/DAU)", "Mengisi pagu &amp; RAB, rencana, jadwal, ST, memverifikasi &amp; membayar SPJ", "Melihat data BLUD"],
                  ["<b>Bendahara BLUD</b>", "Semua untuk BLUD (pagu, rencana, ST, SPJ, pendapatan), laporan keuangan gabungan; BOK/DAU hanya melihat", "Mengubah BOK/DAU"],
                  ["<b>Pengelola Program</b>", "Membuat rencana, menjadwalkan, menerbitkan ST &amp; SPJ untuk BOK/DAU; mengisi belanja non-perjalanan", "Mengubah pagu/RAB; membayar; melihat BLUD"],
-                 ["<b>Pembuat Surat Tugas</b>", "Peran khusus pembuat surat: menjadwalkan, menerbitkan ST/SPD (juga terbit massal), mengunggah ke Srikandi sampai PDF final dan nomor tercatat. Menunya ringkas: Dashboard, Jadwal, Surat, Rekap", "Mengubah pagu/RAB; verifikasi/bayar SPJ; melihat BLUD &amp; laporan keuangan"],
+                 ["<b>Pembuat Surat Tugas</b>", "Hak istimewa: membuat surat <b>sesuai pagu BOK, DAU, maupun BLUD</b> — dari rencana/jadwal sendiri atau <b>usulan Pengelola Program</b> — dan <b>menyetujuinya</b> (selalu, walau persetujuan Kepala diwajibkan). Menerbitkan ST/SPD (terbit massal) sampai PDF final Srikandi tercatat. Menu ringkas: Dashboard, Perencanaan, Jadwal, Surat, Rekap", "Mengubah pagu/RAB; verifikasi/bayar SPJ; <b>data uang BLUD</b> (SPJ, serapan); laporan keuangan"],
                  ["<b>Pegawai</b>", "Melihat jadwal &amp; ST/SPD sendiri, mengisi SPJ perjalanannya, melihat rekap pribadi", "Melihat data orang lain"]], [3.6, 9.6, 3.8]),
-          callout("info", "Persetujuan Kepala bersifat opsional", "Secara bawaan, pembuat rencana/jadwal/surat mengotorisasi sendiri dan tindakannya tercatat di <b>Riwayat Perubahan</b>. Bila Puskesmas ingin persetujuan Kepala diwajibkan, ubah pengaturan <b>kepala_wajib</b> menjadi 1 (menu Pengaturan &amp; Kop).")]
+          callout("info", "Persetujuan Kepala bersifat opsional", "Secara bawaan, pembuat rencana/jadwal/surat mengotorisasi sendiri dan tindakannya tercatat di <b>Riwayat Perubahan</b>. Bila <b>kepala_wajib</b> diubah menjadi 1 (menu Pengaturan &amp; Kop), persetujuan hanya oleh <b>Kepala dan Pembuat Surat Tugas</b>; Bendahara dan Pengelola Program tidak lagi dapat menyetujui sendiri.")]
 
     # ---------- 2 MASUK & MENGENAL LAYAR
     s += bagian(1, "Masuk &amp; mengenal layar", "Dua menit pertama: masuk, ganti password, dan membaca beranda.")
@@ -235,7 +235,9 @@ def isi():
                    ("Klik <b>Simpan &amp; ajukan</b>", "Bendahara akan memeriksa. Bila dikembalikan, alasannya tampil — perbaiki lalu ajukan lagi."),
                    ("Pantau di Dashboard &amp; Rekap Perjalanan", "Lihat status SPJ dan riwayat perjalanan Anda setahun.")]),
           P("Pembuat Surat Tugas", "h2"),
-          langkah([("Buka menu <b>Surat</b> → tab <b>Siap diterbitkan</b>", "Daftar jadwal yang belum punya ST. Centang semuanya (atau sebagian) → <b>Terbitkan yang dipilih</b>."),
+          langkah([("Tinjau usulan Pengelola Program", "Menu <b>Perencanaan</b>: rencana berstatus Diajukan → <b>Setujui</b> atau <b>Tolak</b> (alasan wajib). Di <b>Jadwal Dinas Luar</b>: jadwal Diusulkan → <b>Setujui</b>. Berlaku untuk BOK, DAU, dan BLUD; sistem tetap menjaga batas pagu."),
+                   ("Atau buat sendiri", "Anda juga boleh membuat rencana &amp; jadwal sendiri (lalu menyetujuinya sendiri), selama masih dalam pagu baris RAB."),
+                   ("Buka menu <b>Surat</b> → tab <b>Siap diterbitkan</b>", "Daftar jadwal yang belum punya ST. Centang semuanya (atau sebagian) → <b>Terbitkan yang dipilih</b>. Jadwal yang masih diusulkan otomatis disetujui atas nama Anda."),
                    ("Unduh <b>DOCX Srikandi</b>", "Klik <b>Dokumen</b> pada ST → <b>DOCX Srikandi (ST + SPD)</b>. Unggah ke Srikandi untuk ditandatangani."),
                    ("Klik <b>Tandai sudah diunggah ke Srikandi</b>", "Supaya semua orang tahu surat ini sedang menunggu tanda tangan elektronik."),
                    ("Setelah ditandatangani: <b>Unggah PDF hasil Srikandi</b>", "SIKADIN membaca nomor naskah dari PDF dan menawarkan untuk mencatatnya. Konfirmasi, dan progres berubah menjadi <b>Selesai di Srikandi</b>.")]),
@@ -279,7 +281,7 @@ def isi():
                  ["Nomor surat umum &amp; kode", "Menerbitkan nomor surat selain ST; Kepala dapat mengubah kode penomoran."]], [4.2, 12.8]),
           langkah([("Terbitkan", "Dari tab Siap diterbitkan: tombol <b>Terbitkan ST</b> (satu) atau terbit massal. Periksa tanggal surat, penandatangan, dasar, dan maksud."),
                    ("Unduh dokumen", "Klik <b>Dokumen</b> pada ST. Tiap dokumen punya tombol <b>PDF</b> dan <b>DOCX</b>: Surat Tugas, SPD, Rincian biaya, Kuitansi, Daftar hadir, Pengeluaran riil, Pernyataan pembatalan/pengembalian, atau <b>Semua dokumen</b>."),
-                   ("Unggah ke Srikandi", "Pakai <b>DOCX Srikandi (ST + SPD)</b>. Kode tanda tangan elektronik di dalamnya jangan diubah — Srikandi yang mengisinya."),
+                   ("Unggah ke Srikandi", "Pilih <b>DOCX Srikandi (ST + SPD)</b> atau <b>PDF Srikandi (ST + SPD)</b>. Kode tanda tangan elektronik di dalamnya jangan diubah — Srikandi yang mengisinya."),
                    ("Tandai &amp; unggah hasil Srikandi", "Klik <b>Tandai sudah diunggah ke Srikandi</b>. Setelah ditandatangani, klik <b>Unggah PDF hasil Srikandi</b>: nomor naskah terbaca otomatis dari PDF dan Anda cukup mengonfirmasi (atau pakai <b>Catat nomor Srikandi</b> secara manual — hanya bisa diisi sekali)."),
                    ("Pantau progres", "Tiap ST menampilkan <b>Srikandi 0/3 … 3/3</b> (diunggah · nomor dicatat · PDF final) dan <b>Selesai di Srikandi</b> bila lengkap. PDF final dapat dilihat kembali kapan saja; boleh diganti, dan penggantian tercatat di riwayat."),
                    ("Salah? Batalkan &amp; terbitkan ulang", "<b>Batalkan ST</b> (alasan wajib), lalu terbitkan lagi dengan nomor baru. ST tidak bisa diedit setelah terbit.")]),
@@ -303,6 +305,12 @@ def isi():
           langkah([("Atur filter", "Pilih tahun, bulan (atau Setahun), sumber dana, pegawai, tempat, atau ketik kata pada tujuan."),
                    ("Pilih tab", "<b>Rincian</b> (satu baris per orang per perjalanan), <b>Per bulan</b> (12 bulan + jumlah), <b>Per nama</b> (matriks 12 bulan; arahkan kursor untuk melihat biaya), <b>Per tempat</b>."),
                    ("Unduh", "Tombol <b>PDF</b>, <b>DOCX</b>, atau <b>XLSX</b> (Excel, empat lembar). Biaya SPD = tarif Perbup; Realisasi = SPJ yang sudah dibayar.")]),
+          P("G. Buku Kas Umum (BKU)", "h2"),
+          P("Menu <b>Buku Kas Umum (BKU)</b> menyajikan buku kas dengan format Puskesmas Melati: <b>BOK</b> dan <b>DAU</b> (Bendahara Pengeluaran Pembantu), <b>Retribusi</b> (Bendahara Penerimaan), dan <b>BLUD</b> (Bendahara Dana BLUD). Pilih buku, tahun, dan bulan — atau <b>Tahunan</b> untuk seluruh tahun."),
+          langkah([("Isi <b>Saldo awal</b> sekali di awal tahun", "Tombol <b>Saldo awal</b>. Untuk BLUD, rinci per tempat (Bank/Kas) dan jenis dana agar rincian saldo di akhir BKU benar."),
+                   ("Pembayaran SPJ masuk otomatis", "Nomor bukti dan uraian mengikuti format Puskesmas (mis. <b>122/PKM.M/2026</b>, <b>Pembayaran … An. …</b>)."),
+                   ("Catat transaksi lain", "<b>+ Catat transaksi</b>: penerimaan, pengeluaran (mis. jasa bunga giro), <b>setor/pindah</b> antar buku (retribusi → BLUD), atau <b>terima lalu teruskan</b> (Qris). Transaksi manual dapat dihapus; yang berasal dari SPJ dikoreksi lewat SPJ."),
+                   ("Cetak", "Tombol <b>PDF</b>, <b>DOCX</b>, <b>XLSX</b>. Bulanan memuat jumlah bulan ini, s.d. bulan lalu, sisa, dan tanda tangan; tahunan memuat tiap bulan berurutan.")]),
           P("G. Akuntansi &amp; Laporan Keuangan (Kepala &amp; Bendahara BLUD)", "h2"),
           P("Laporan disusun menurut <b>PSAP 13</b> dan menggabungkan <b>seluruh sumber dana</b> (DAU, BOK, BLUD) menjadi satu kesatuan. Menu ini hanya terlihat oleh Kepala dan Bendahara BLUD."),
           langkah([("Isi <b>Saldo awal</b> (sekali di awal tahun)", "Tab Saldo awal: isi saldo kas, piutang, peralatan, dst. Sistem memeriksa <b>Aset = Kewajiban + Ekuitas</b> sebelum menyimpan."),
@@ -328,7 +336,7 @@ def isi():
                  ["ST &amp; SPD", "Terkunci setelah terbit; perubahan hanya dengan batal + terbit ulang; harus muat satu halaman."],
                  ["SPJ", "Realisasi ≤ tarif SPD; bukti diisi; dibayar setelah diverifikasi; tidak ada panjar."],
                  ["Pagu", "Total dibayar per baris RAB ≤ pagu baris."],
-                 ["BLUD", "Hanya Kepala &amp; Bendahara BLUD yang melihat/mengubah data BLUD."],
+                 ["BLUD", "Kepala &amp; Bendahara BLUD memegang data BLUD. Pembuat Surat hanya mengurus <b>surat</b> BLUD (RAB, rencana, jadwal, ST) — tanpa data uang BLUD (SPJ, serapan, laporan)."],
                  ["Riwayat", "Setiap perubahan penting tercatat (siapa, kapan, sebelum/sesudah) di menu Riwayat Perubahan."]], [3.6, 13.4]),
           P("Pertanyaan yang sering muncul", "h2"),
           tabel([["Pertanyaan", "Jawaban"],

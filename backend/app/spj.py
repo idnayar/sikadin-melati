@@ -12,7 +12,7 @@ from fastapi.responses import Response
 
 from . import akuntansi, sinkron
 from . import dokumen as dk
-from .core import Gagal, akses_sumber, audit, auth, cek_sumber, get_db
+from .core import Gagal, akses_uang, audit, auth, cek_uang, get_db
 from .surat import DOCX, _pdf_ke_docx
 
 router = APIRouter(prefix="/api/spj")
@@ -54,7 +54,7 @@ def _ambil(db, sid):
 
 def _akses(user, r) -> tuple[bool, bool]:
     """(boleh_lihat, penuh). penuh = berhak atas sumber dananya (bukan sekadar petugas yang bersangkutan)."""
-    if user["role"] != "pegawai" and akses_sumber(user, r["dana"], "baca"):
+    if user["role"] != "pegawai" and akses_uang(user, r["dana"], "baca"):
         return True, True
     return (bool(user.get("pegawai_id")) and r["jenis"] == "SPD" and r["pegawai_id"] == user.get("pegawai_id")), False
 
@@ -70,8 +70,8 @@ def _bisa_ubah(user, r, penuh) -> bool:
     if r["status"] not in EDIT:
         return False
     if r["jenis"] == "SPD":
-        return (penuh and akses_sumber(user, r["dana"], "rencana")) or (not penuh)
-    return penuh and akses_sumber(user, r["dana"], "rencana")
+        return (penuh and akses_uang(user, r["dana"], "rencana")) or (not penuh)
+    return penuh and akses_uang(user, r["dana"], "rencana")
 
 
 def _bentuk(r, penuh, user) -> dict:
@@ -79,7 +79,7 @@ def _bentuk(r, penuh, user) -> dict:
     o["rincian"] = json.loads(r["rincian_json"] or "[]")
     o["penuh"] = penuh
     o["bisa_ubah"] = _bisa_ubah(user, r, penuh)
-    pagu_ok = user["role"] != "pegawai" and akses_sumber(user, r["dana"], "pagu")
+    pagu_ok = user["role"] != "pegawai" and akses_uang(user, r["dana"], "pagu")
     o["bisa_verifikasi"] = pagu_ok and r["status"] == "Diajukan"
     o["bisa_bayar"] = pagu_ok and r["status"] == "Diverifikasi"
     o["bisa_koreksi"] = user["role"] == "kepala" and r["status"] == "Dibayar"
@@ -132,7 +132,7 @@ def belum(tahun: int, user=Depends(auth), db=Depends(get_db)):
         WHERE j.tahun=? AND NOT EXISTS(SELECT 1 FROM spj s WHERE s.spd_id=d.id) ORDER BY j.mulai, st.id, p.nama""", (tahun,)).fetchall()
     out = []
     for r in rows:
-        if user["role"] != "pegawai" and akses_sumber(user, r["dana"], "rencana"):
+        if user["role"] != "pegawai" and akses_uang(user, r["dana"], "rencana"):
             out.append(r)
         elif user.get("pegawai_id") and r["pegawai_id"] == user["pegawai_id"]:
             out.append(r)
@@ -147,7 +147,7 @@ def dari_spd(spd_id: int, user=Depends(auth), db=Depends(get_db)):
     if not d:
         raise Gagal("SPD tidak ditemukan.", 404)
     own = bool(user.get("pegawai_id")) and d["pegawai_id"] == user["pegawai_id"]
-    if not (own or (user["role"] != "pegawai" and akses_sumber(user, d["dana"], "rencana"))):
+    if not (own or (user["role"] != "pegawai" and akses_uang(user, d["dana"], "rencana"))):
         raise Gagal("Anda tidak berhak membuat SPJ ini.", 403)
     if d["st_status"] != "Terbit":
         raise Gagal("ST sudah dibatalkan; SPJ tidak dapat dibuat.")
@@ -165,7 +165,7 @@ def buat_umum(body: dict = Body(default={}), user=Depends(auth), db=Depends(get_
         raise Gagal("Baris RAB tidak ditemukan.", 404)
     if user["role"] == "pegawai":
         raise Gagal("Tidak ada akses.", 403)
-    cek_sumber(user, b["dana"], "rencana")
+    cek_uang(user, b["dana"], "rencana")
     uraian = str(body.get("uraian") or "").strip()
     if len(uraian) < 3:
         raise Gagal("Uraian belanja wajib diisi.")
@@ -187,7 +187,7 @@ def ringkasan(tahun: int, sumber: str, user=Depends(auth), db=Depends(get_db)):
     if user["role"] == "pegawai":
         raise Gagal("Tidak ada akses.", 403)
     sumber = sumber.upper()
-    cek_sumber(user, sumber, "baca")
+    cek_uang(user, sumber, "baca")
     sd = db.execute("SELECT id FROM sumber_dana WHERE kode=?", (sumber,)).fetchone()
     if not sd:
         raise Gagal("Sumber dana tidak dikenal.", 404)
@@ -241,7 +241,7 @@ def rekap(tahun: int, sumber: str, bulan: int = 0, format: str = "pdf", user=Dep
     if user["role"] == "pegawai":
         raise Gagal("Tidak ada akses.", 403)
     sumber = sumber.upper()
-    cek_sumber(user, sumber, "baca")
+    cek_uang(user, sumber, "baca")
     ids = db.execute("""SELECT s.id FROM spj s JOIN sumber_dana sd ON sd.id=s.sumber_dana_id WHERE s.tahun=? AND sd.kode=? AND s.status='Dibayar'
         AND (?=0 OR CAST(substr(s.tanggal_bayar,6,2) AS INTEGER)=?) ORDER BY s.tanggal_bayar, s.id""", (tahun, sumber, bulan, bulan)).fetchall()
     rows = [_ambil(db, x["id"]) for x in ids]
@@ -420,7 +420,7 @@ def ubah_status(sid: int, body: dict = Body(default={}), user=Depends(auth), db=
     penuh = _lihat(user, r)
     ke, alasan = str(body.get("ke") or ""), str(body.get("alasan") or "").strip()
     dari = r["status"]
-    pagu_ok = user["role"] != "pegawai" and akses_sumber(user, r["dana"], "pagu")
+    pagu_ok = user["role"] != "pegawai" and akses_uang(user, r["dana"], "pagu")
     sekarang = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     sets: dict = {"status": ke}
     if ke == "Diajukan":
@@ -457,10 +457,12 @@ def ubah_status(sid: int, body: dict = Body(default={}), user=Depends(auth), db=
             raise Gagal("Tanggal bayar tidak boleh sebelum kegiatan dimulai.")
         no = str(body.get("no_bukti") or "").strip()
         if not no:
+            fmt = _set(db, "format_bukti_spj", "{urut}/PKM.M/{tahun}")
+            bentuk = lambda n_: fmt.replace("{urut}", str(n_)).replace("{tahun}", str(r["tahun"])).replace("{sumber}", r["dana"])  # noqa: E731
             n = db.execute("SELECT COUNT(*) c FROM spj WHERE sumber_dana_id=? AND tahun=? AND no_bukti IS NOT NULL", (r["sumber_dana_id"], r["tahun"])).fetchone()["c"] + 1
-            while db.execute("SELECT 1 FROM spj WHERE sumber_dana_id=? AND tahun=? AND no_bukti=?", (r["sumber_dana_id"], r["tahun"], f"BP/{r['dana']}/{r['tahun']}/{n:04d}")).fetchone():
+            while db.execute("SELECT 1 FROM spj WHERE sumber_dana_id=? AND tahun=? AND no_bukti=?", (r["sumber_dana_id"], r["tahun"], bentuk(n))).fetchone():
                 n += 1
-            no = f"BP/{r['dana']}/{r['tahun']}/{n:04d}"
+            no = bentuk(n)
         sets.update(tanggal_bayar=tb, no_bukti=no, dibayar_oleh=user["username"], dibayar_pada=sekarang)
     else:
         raise Gagal("Status tujuan tidak valid.")

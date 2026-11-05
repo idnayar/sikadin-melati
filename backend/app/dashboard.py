@@ -4,7 +4,7 @@ import datetime as dt
 
 from fastapi import APIRouter, Depends
 
-from .core import akses_sumber, auth, get_db, kepala_wajib
+from .core import akses_sumber, akses_uang, auth, boleh_setuju, get_db, kepala_wajib
 
 router = APIRouter(prefix="/api/dashboard")
 SUMBER = ("BOK", "DAU", "BLUD")
@@ -39,7 +39,8 @@ def _pegawai(db, user, tahun):
 def dashboard(tahun: int, user=Depends(auth), db=Depends(get_db)):
     if user["role"] == "pegawai":
         return _pegawai(db, user, tahun)
-    ok = [k for k in SUMBER if akses_sumber(user, k, "baca")]
+    ok = [k for k in SUMBER if akses_uang(user, k, "baca")]                 # sumber yang boleh dilihat UANG-nya
+    srt = [k for k in SUMBER if akses_sumber(user, k, "baca")]              # sumber untuk alur surat (Pembuat Surat: termasuk BLUD)
     ph = ",".join("?" * len(ok)) or "''"
     hari = dt.date.today()
     bulan_ini = hari.month if hari.year == tahun else 12
@@ -74,25 +75,27 @@ def dashboard(tahun: int, user=Depends(auth), db=Depends(get_db)):
     out["bulanan"] = {"rencana": bul_ren, "realisasi": bul_real}
 
     # --- tugas yang menunggu
-    can_rencana = [k for k in ok if akses_sumber(user, k, "rencana")]
-    can_pagu = [k for k in ok if akses_sumber(user, k, "pagu")]
+    can_rencana = [k for k in srt if akses_sumber(user, k, "rencana")]       # rencana/jadwal/ST
+    can_rencana_uang = [k for k in ok if akses_uang(user, k, "rencana")]     # SPJ draft
+    can_pagu = [k for k in ok if akses_uang(user, k, "pagu")]
     pr = ",".join("?" * len(can_rencana)) or "''"
+    pu = ",".join("?" * len(can_rencana_uang)) or "''"
     pp = ",".join("?" * len(can_pagu)) or "''"
     c = lambda q, a: db.execute(q, a).fetchone()["c"]  # noqa: E731
-    setuju = user["role"] == "kepala" or not kepala_wajib(db)
+    setuju = boleh_setuju(db, user)
     tugas = []
     n = c(f"SELECT COUNT(*) c FROM rencana r JOIN sumber_dana sd ON sd.id=r.sumber_dana_id WHERE r.tahun=? AND r.status='Diajukan' AND sd.kode IN ({pr})", (tahun, *can_rencana)) if setuju else 0
     tugas.append({"kunci": "rencana", "label": "Rencana menunggu persetujuan", "n": n, "tujuan": "rencana"})
     n = c(f"SELECT COUNT(*) c FROM jadwal j JOIN sumber_dana sd ON sd.id=j.sumber_dana_id WHERE j.tahun=? AND j.status='Diusulkan' AND sd.kode IN ({pr})", (tahun, *can_rencana)) if setuju else 0
     tugas.append({"kunci": "jadwal", "label": "Jadwal diusulkan (belum disetujui)", "n": n, "tujuan": "jadwal"})
-    sts = "('Disetujui','Diusulkan')" if not kepala_wajib(db) else "('Disetujui')"
+    sts = "('Disetujui','Diusulkan')" if setuju else "('Disetujui')"
     n = c(f"""SELECT COUNT(*) c FROM jadwal j JOIN sumber_dana sd ON sd.id=j.sumber_dana_id WHERE j.tahun=? AND j.status IN {sts} AND sd.kode IN ({pr})
         AND NOT EXISTS(SELECT 1 FROM surat_tugas s WHERE s.jadwal_id=j.id AND s.status='Terbit')""", (tahun, *can_rencana))
     tugas.append({"kunci": "st", "label": "Jadwal siap dibuatkan Surat Tugas", "n": n, "tujuan": "st"})
     n = c(f"""SELECT COUNT(*) c FROM surat_tugas s JOIN jadwal jj ON jj.id=s.jadwal_id JOIN sumber_dana sd ON sd.id=s.sumber_dana_id WHERE jj.tahun=? AND s.status='Terbit'
         AND (s.nomor_srikandi IS NULL OR NOT EXISTS(SELECT 1 FROM st_final f WHERE f.st_id=s.id)) AND sd.kode IN ({pr})""", (tahun, *can_rencana))
     tugas.append({"kunci": "srikandi", "label": "ST belum selesai di Srikandi (nomor / PDF final)", "n": n, "tujuan": "st"})
-    n = c(f"SELECT COUNT(*) c FROM spj s JOIN sumber_dana sd ON sd.id=s.sumber_dana_id WHERE s.tahun=? AND s.status IN ('Draft','Dikembalikan') AND sd.kode IN ({pr})", (tahun, *can_rencana))
+    n = c(f"SELECT COUNT(*) c FROM spj s JOIN sumber_dana sd ON sd.id=s.sumber_dana_id WHERE s.tahun=? AND s.status IN ('Draft','Dikembalikan') AND sd.kode IN ({pu})", (tahun, *can_rencana_uang))
     tugas.append({"kunci": "spj_draft", "label": "SPJ belum diajukan / dikembalikan", "n": n, "tujuan": "spj"})
     n = c(f"SELECT COUNT(*) c FROM spj s JOIN sumber_dana sd ON sd.id=s.sumber_dana_id WHERE s.tahun=? AND s.status='Diajukan' AND sd.kode IN ({pp})", (tahun, *can_pagu))
     tugas.append({"kunci": "verifikasi", "label": "SPJ menunggu verifikasi", "n": n, "tujuan": "spj"})
@@ -107,7 +110,7 @@ def dashboard(tahun: int, user=Depends(auth), db=Depends(get_db)):
         FROM jadwal j JOIN sumber_dana sd ON sd.id=j.sumber_dana_id JOIN lokasi l ON l.id=j.lokasi_id
         WHERE j.status IN ('Diusulkan','Disetujui') AND j.selesai>=? AND j.mulai<=? ORDER BY j.mulai, j.id LIMIT 12""", (sd_, ed_)).fetchall()
     for j in jw:
-        if j["dana"] not in ok:
+        if j["dana"] not in srt:
             j["kegiatan"], j["lokasi"] = "Kegiatan BLUD (terbatas)", "-"
     out["jadwal_dekat"] = jw
 
@@ -139,6 +142,6 @@ def dashboard(tahun: int, user=Depends(auth), db=Depends(get_db)):
                            "seimbang": not d["neraca"]["catatan"]}
     # --- ringkasan perjalanan dinas tahun ini
     rd = db.execute(f"""SELECT COUNT(DISTINCT st.id) st, COUNT(*) orang FROM spd d JOIN surat_tugas st ON st.id=d.st_id AND st.status='Terbit' JOIN jadwal j ON j.id=st.jadwal_id
-        JOIN sumber_dana sd ON sd.id=st.sumber_dana_id WHERE substr(j.mulai,1,4)=? AND sd.kode IN ({ph})""", (str(tahun), *ok)).fetchone()
+        JOIN sumber_dana sd ON sd.id=st.sumber_dana_id WHERE substr(j.mulai,1,4)=? AND sd.kode IN ({",".join("?" * len(srt)) or "''"})""", (str(tahun), *srt)).fetchone()
     out["dinas"] = {"st": rd["st"], "orang": rd["orang"]}
     return out

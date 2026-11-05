@@ -11,7 +11,7 @@ from openpyxl import Workbook, load_workbook
 from starlette.background import BackgroundTask
 
 from . import core
-from .core import Gagal, akses_sumber, audit, auth, bisa_baca, bisa_tulis, get_db, kepala_wajib, pesan_db
+from .core import Gagal, akses_sumber, akses_uang, audit, auth, bisa_baca, bisa_tulis, boleh_setuju, get_db, kepala_wajib, pesan_db
 from .db import DB_PATH, hash_password, hitung_tingkat, verify_password
 
 router = APIRouter(prefix="/api")
@@ -247,7 +247,7 @@ def meta(user=Depends(auth), db=Depends(get_db)):
                 "noCreate": r.get("noCreate"), "noDelete": r.get("noDelete")}
     akses = {k: {a: akses_sumber(user, k, a) for a in ("baca", "pagu", "rencana")} for k in ("BOK", "DAU", "BLUD")}
     return {"user": user, "meta": m, "bisaTulis": bisa_tulis(user), "bisaBaca": bisa_baca(user), "akses": akses,
-            "kepalaWajib": kepala_wajib(db), "akuntansi": user["role"] in ("kepala", "bendahara_blud")}
+            "kepalaWajib": kepala_wajib(db), "bisaSetuju": boleh_setuju(db, user), "akuntansi": user["role"] in ("kepala", "bendahara_blud")}
 
 
 @router.get("/data/{res}")
@@ -432,7 +432,7 @@ def export_xlsx(user=Depends(auth), db=Depends(get_db)):
         if not r.get("onlyKepala"):
             sheet(k, db.execute(f"SELECT * FROM {r['tabel']} ORDER BY id").fetchall())
     if bisa_tulis(user):
-        sheet("riwayat", db.execute("SELECT * FROM audit_log WHERE (sumber IS NULL OR sumber!='BLUD' OR ?) ORDER BY id", (1 if akses_sumber(user, "BLUD") else 0,)).fetchall())
+        sheet("riwayat", db.execute("SELECT * FROM audit_log WHERE (sumber IS NULL OR sumber!='BLUD' OR ?) ORDER BY id", (1 if akses_uang(user, "BLUD") else 0,)).fetchall())
     return _xlsx_resp(wb, f"sikadin_data_{dt.date.today().isoformat()}.xlsx")
 
 
@@ -505,7 +505,7 @@ async def pulihkan(request: Request, user=Depends(auth)):
 def riwayat(tabel: str | None = None, user=Depends(auth), db=Depends(get_db)):
     if not (bisa_tulis(user) or user["role"] == "bendahara_blud"):
         raise Gagal("Hanya Kepala/Bendahara.", 403)
-    q, a = ["(sumber IS NULL OR sumber!='BLUD' OR ?)"], [1 if akses_sumber(user, "BLUD") else 0]   # catatan BLUD hanya untuk yang berwenang
+    q, a = ["(sumber IS NULL OR sumber!='BLUD' OR ?)"], [1 if akses_uang(user, "BLUD") else 0]   # catatan BLUD hanya untuk yang berwenang
     if tabel:
         q.append("tabel=?")
         a.append(tabel)

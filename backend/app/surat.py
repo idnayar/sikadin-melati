@@ -9,7 +9,7 @@ from fastapi.responses import Response
 
 from . import dokumen as dk
 from .calc import hitung
-from .core import Gagal, akses_sumber, audit, auth, cek_sumber, get_db, kepala_wajib, kode_sd, perlu_baca
+from .core import Gagal, akses_sumber, akses_uang, audit, auth, boleh_setuju, cek_sumber, get_db, kepala_wajib, kode_sd, perlu_baca
 from . import sinkron
 from .docx_srikandi import isi_templat
 from .penomoran import bentuk_nomor, nomor_berikut, pasang_nomor
@@ -78,7 +78,7 @@ def siap(tahun: int, user=Depends(perlu_baca), db=Depends(get_db)):
     """Jadwal Disetujui yang belum punya ST aktif. Hanya yang boleh diterbitkan pengguna (Kepala; bendahara sesuai sumber dana)."""
     rows = db.execute("""SELECT j.id, j.rencana_id, j.kegiatan, j.mulai, j.selesai, j.lokasi_id, l.nama lokasi, sd.kode dana
         FROM jadwal j JOIN lokasi l ON l.id=j.lokasi_id JOIN sumber_dana sd ON sd.id=j.sumber_dana_id
-        WHERE j.tahun=? AND j.status IN ('Disetujui'%s) AND NOT EXISTS(SELECT 1 FROM surat_tugas s WHERE s.jadwal_id=j.id AND s.status='Terbit') ORDER BY j.mulai, j.id""" % ("" if kepala_wajib(db) else ",'Diusulkan'"), (tahun,)).fetchall()
+        WHERE j.tahun=? AND j.status IN ('Disetujui'%s) AND NOT EXISTS(SELECT 1 FROM surat_tugas s WHERE s.jadwal_id=j.id AND s.status='Terbit') ORDER BY j.mulai, j.id""" % (",'Diusulkan'" if boleh_setuju(db, user) else ""), (tahun,)).fetchall()
     rows = [r for r in rows if akses_sumber(user, r["dana"], "rencana")]
     for r in rows:
         r["petugas"] = [x["nama"] for x in db.execute("SELECT p.nama FROM jadwal_petugas jp JOIN pegawai p ON p.id=jp.pegawai_id WHERE jp.jadwal_id=? ORDER BY p.nama", (r["id"],)).fetchall()]
@@ -104,12 +104,12 @@ def draft(jid: int, user=Depends(perlu_baca), db=Depends(get_db)):
 def terbit(body: dict = Body(default={}), user=Depends(perlu_baca), db=Depends(get_db)):
     j = _jadwal_info(db, int(body.get("jadwal_id") or 0))
     cek_sumber(user, j["dana"], "rencana")   # pembuat surat mengotorisasi sendiri; persetujuan Kepala opsional
-    if j["status"] == "Diusulkan" and not kepala_wajib(db):
+    if j["status"] == "Diusulkan" and boleh_setuju(db, user):
         db.execute("UPDATE jadwal SET status='Disetujui', diputuskan_oleh=?, diputuskan_pada=datetime('now','localtime') WHERE id=?", (user["username"], j["id"]))
         audit(db, user, "jadwal", j["id"], "STATUS", {"status": "Diusulkan"}, {"status": "Disetujui", "catatan": "diotorisasi pembuat surat saat menerbitkan ST"}, j["dana"])
         j["status"] = "Disetujui"
     if j["status"] != "Disetujui":
-        raise Gagal(f"Jadwal berstatus {j['status']}; hanya jadwal Disetujui" + ("" if not kepala_wajib(db) else " (oleh Kepala)") + " yang dapat diterbitkan Surat Tugasnya.")
+        raise Gagal(f"Jadwal berstatus {j['status']}; hanya jadwal Disetujui" + ("" if boleh_setuju(db, user) else " (oleh Kepala)") + " yang dapat diterbitkan Surat Tugasnya.")
     if db.execute("SELECT 1 FROM surat_tugas WHERE jadwal_id=? AND status='Terbit'", (j["id"],)).fetchone():
         raise Gagal("Jadwal ini sudah punya Surat Tugas aktif. Batalkan dulu bila perlu terbit ulang.")
     try:
@@ -210,6 +210,9 @@ def daftar(tahun: int, status: str | None = None, user=Depends(auth), db=Depends
         if not penuh:   # petugas biasa: hanya SPD miliknya, tanpa biaya orang lain
             sp = [x for x in sp if x["pegawai_id"] == user.get("pegawai_id")]
         s["spd"] = sp
+        if not akses_uang(user, s["dana"]):   # Pembuat Surat tidak melihat uang BLUD (SPJ/realisasi)
+            for x in sp:
+                x["spj_id"] = x["spj_status"] = x["spj_total"] = x["spj_bukti"] = x["spj_tgl_bayar"] = None
         s["srikandi"] = {"diunggah": bool(s["srikandi_diunggah_pada"]), "nomor": bool(s["nomor_srikandi"]), "final": bool(s["ada_final"])}
         s["srikandi"]["selesai"] = s["srikandi"]["nomor"] and s["srikandi"]["final"]
         s["realisasi"] = {"dibayar": sum(x["spj_total"] or 0 for x in sp if x["spj_status"] == "Dibayar"), "rencana": sum(x["total"] for x in sp),
@@ -340,7 +343,7 @@ def lihat_final(sid: int, user=Depends(auth), db=Depends(get_db)):
     return Response(f["data"], media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="{f["nama"]}"', "Cache-Control": "private, no-store"})
 
 
-DOK_PENUH = {"st", "spd", "rincian", "riil", "batal", "kembali", "hadir", "kuitansi", "paket", "lengkap", "srikandi"}
+DOK_PENUH = {"st", "spd", "rincian", "riil", "batal", "kembali", "hadir", "kuitansi", "paket", "lengkap", "srikandi", "srikandi_pdf"}
 DOK_PETUGAS = {"st", "spd", "rincian", "paket"}
 DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
@@ -394,14 +397,18 @@ def dokumen(sid: int, dok: str = "st", pegawai_id: int | None = None, mode: str 
     elif pegawai_id:
         spds = [x for x in spds if x["pegawai_id"] == pegawai_id]
     mode = "srikandi" if mode == "srikandi" else "cetak"
+    if dok == "srikandi_pdf":   # PDF untuk diunggah ke Srikandi: ST + SPD, memuat kode tanda tangan elektronik (${...}) dan catatan BSrE
+        if s["status"] != "Terbit":
+            raise Gagal("Surat Tugas yang dibatalkan tidak dapat diekspor ke Srikandi.")
+        mode = "srikandi"
     if dok not in ("st", "spd", "hadir", "paket", "lengkap") and not spds:
         raise Gagal("Petugas tidak ditemukan pada Surat Tugas ini.", 404)
     B = lambda x: json.loads(x["biaya_json"])  # noqa: E731
     parts: list[list] = []
     ft = mode == "srikandi"
-    if dok in ("st", "paket", "lengkap"):
+    if dok in ("st", "paket", "lengkap", "srikandi_pdf"):
         parts.append(dk.muat_halaman(lambda: dk.d_st(isi, stx, mode), 1, footer=ft))        # ST: satu halaman, tanda tangan ikut
-    if dok in ("spd", "paket", "lengkap"):
+    if dok in ("spd", "paket", "lengkap", "srikandi_pdf"):
         parts.append(dk.muat_halaman(lambda: dk.d_spd(isi, stx, spds, mode), 2, footer=ft))  # SPD: depan + belakang
     if dok == "hadir" or dok == "lengkap":
         parts.append(dk.d_hadir(isi, stx))
@@ -421,8 +428,8 @@ def dokumen(sid: int, dok: str = "st", pegawai_id: int | None = None, mode: str 
         from .dokumen import S as GAYA
         tanda = Paragraph(f'<font color="#b91c1c"><b>*** DIBATALKAN — {dk.esc(s["alasan_batal"])} ***</b></font>', GAYA["c"])
         parts = [[tanda, *p] for p in parts]
-    pdf = dk.build_pdf(dk.gabung(*parts), f"{dok.upper()} {stx['nomor_tampil']}", footer_srikandi=(mode == "srikandi" and dok in ("st", "spd")))
+    pdf = dk.build_pdf(dk.gabung(*parts), f"{dok.upper()} {stx['nomor_tampil']}", footer_srikandi=(mode == "srikandi" and dok in ("st", "spd", "srikandi_pdf")))
     if format == "docx":   # dokumen non-templat: PDF dikonversi ke DOCX yang dapat disunting
         data = _pdf_ke_docx(pdf)
         return Response(data, media_type=DOCX, headers={"Content-Disposition": f'attachment; filename="{dok.upper()}_{nama_berkas}.docx"', "Cache-Control": "no-store"})
-    return Response(pdf, media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="{dok.upper()}_{nama_berkas}.pdf"', "Cache-Control": "no-store"})
+    return Response(pdf, media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="{('ST_SPD_Srikandi' if dok == 'srikandi_pdf' else dok.upper())}_{nama_berkas}.pdf"', "Cache-Control": "no-store"})

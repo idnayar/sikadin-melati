@@ -208,11 +208,11 @@ CREATE TABLE IF NOT EXISTS akun(
 CREATE TABLE IF NOT EXISTS jurnal(
   id INTEGER PRIMARY KEY, tahun INTEGER NOT NULL, tanggal TEXT NOT NULL, no_bukti TEXT, uraian TEXT NOT NULL,
   basis TEXT NOT NULL CHECK(basis IN ('AWAL','KAS','AKRUAL')), sumber_dana_id INTEGER REFERENCES sumber_dana(id),
-  ref_jenis TEXT, ref_id INTEGER, dibuat_oleh TEXT, dibuat_pada TEXT DEFAULT (datetime('now','localtime')));
+  ref_jenis TEXT, ref_id INTEGER, uraian_buku TEXT, dibuat_oleh TEXT, dibuat_pada TEXT DEFAULT (datetime('now','localtime')));
 CREATE INDEX IF NOT EXISTS ix_jurnal_tahun ON jurnal(tahun, tanggal);
 CREATE INDEX IF NOT EXISTS ix_jurnal_ref ON jurnal(ref_jenis, ref_id);
 CREATE TABLE IF NOT EXISTS jurnal_baris(
-  id INTEGER PRIMARY KEY, jurnal_id INTEGER NOT NULL REFERENCES jurnal(id) ON DELETE CASCADE, akun_id INTEGER NOT NULL REFERENCES akun(id),
+  id INTEGER PRIMARY KEY, jurnal_id INTEGER NOT NULL REFERENCES jurnal(id) ON DELETE CASCADE, akun_id INTEGER NOT NULL REFERENCES akun(id), tempat TEXT, dana TEXT,
   debit INTEGER NOT NULL DEFAULT 0 CHECK(debit >= 0), kredit INTEGER NOT NULL DEFAULT 0 CHECK(kredit >= 0), CHECK(debit = 0 OR kredit = 0));
 CREATE TABLE IF NOT EXISTS anggaran_pendapatan(
   id INTEGER PRIMARY KEY, tahun INTEGER NOT NULL, akun_id INTEGER NOT NULL REFERENCES akun(id), jumlah INTEGER NOT NULL DEFAULT 0 CHECK(jumlah >= 0), UNIQUE(tahun, akun_id));
@@ -221,8 +221,10 @@ CREATE TABLE IF NOT EXISTS calk(tahun INTEGER NOT NULL, bagian TEXT NOT NULL, is
 
 # (kode, nama, jenis, normal, kas, arus, lra)
 AKUN_AWAL = [
-    ("1.1.1.01", "Kas di Bendahara Pengeluaran (BOK/DAU)", "ASET", "D", 1, "OPERASI", None),
+    ("1.1.1.01", "Kas Bendahara Pengeluaran Pembantu — BOK", "ASET", "D", 1, "OPERASI", None),
     ("1.1.1.02", "Kas BLUD (Kas pada BLU)", "ASET", "D", 1, "OPERASI", None),
+    ("1.1.1.03", "Kas Bendahara Penerimaan (Retribusi)", "ASET", "D", 1, "OPERASI", None),
+    ("1.1.1.04", "Kas Bendahara Pengeluaran Pembantu — DAU", "ASET", "D", 1, "OPERASI", None),
     ("1.1.2.01", "Piutang Jasa Layanan", "ASET", "D", 0, "OPERASI", None),
     ("1.1.3.01", "Persediaan Obat dan BMHP", "ASET", "D", 0, "OPERASI", None),
     ("1.1.4.01", "Belanja Dibayar di Muka", "ASET", "D", 0, "OPERASI", None),
@@ -247,6 +249,13 @@ AKUN_AWAL = [
 ]
 
 
+PEJABAT_BKU = [
+    ("Bendahara Pengeluaran Pembantu", "ANISA, A.Md.Kep", "199410102020122026", "", "Bendahara Pengeluaran Pembantu"),
+    ("Bendahara Penerimaan", "SARI NINDIATI, Amd. Keb", "198910072011012004", "", "Bendahara Penerimaan"),
+    ("Bendahara Dana Kapitasi/BLUD", "WARIE KRISTINA MIASIE, S.Kep.,Ns", "198601282011012008", "", "Bendahara Dana Kapitasi/BLUD"),
+]
+
+
 JENIS_NOMOR_AWAL = [
     ("ST-BOK", "Surat Tugas & SPD — BOK", "000.1.2.3", "PKM.MELATI.BOK", "000.1.2.3 = Perjalanan Dinas Pegawai (Permendagri 83/2022). Seri nomor khusus BOK."),
     ("ST-DAU", "Surat Tugas & SPD — DAU", "000.1.2.3", "PKM.MELATI.DAU", "Seri nomor khusus DAU."),
@@ -256,6 +265,8 @@ JENIS_NOMOR_AWAL = [
 
 # Pengaturan yang ditambahkan setelah rilis awal (ditambahkan otomatis ke database lama)
 PENGATURAN_BARU = [
+    ("bku_skpd", "PUSKESMAS MELATI", "Nama SKPD pada Buku Kas Umum (BKU)"),
+    ("format_bukti_spj", "{urut}/PKM.M/{tahun}", "Format nomor bukti pembayaran SPJ/BKU. Kode: {urut} {tahun} {sumber}"),
     ("kepala_wajib", "0", "1 = rencana/jadwal harus disetujui Kepala; 0 (bawaan) = persetujuan Kepala opsional, pembuat surat/penjadwalan dapat mengotorisasi sendiri (tercatat di riwayat)"),
     ("spj_setelah_selesai", "1", "1 = SPJ perjalanan dinas baru boleh diajukan setelah tanggal selesai kegiatan; 0 = boleh kapan saja"),
     ("batas_persen_ruangan", "50", "Maks. % pegawai satu ruangan yang boleh meninggalkan ruangan (dinas luar/cuti) pada hari yang sama"),
@@ -394,6 +405,18 @@ def init_db() -> None:
             con.execute(f"ALTER TABLE pegawai ADD COLUMN {kol} TEXT")
     if con.execute("SELECT COUNT(*) c FROM pegawai").fetchone()["c"] == 0:
         _seed(con)
+    kol_j = {r["name"] for r in con.execute("PRAGMA table_info(jurnal)").fetchall()}
+    if kol_j and "uraian_buku" not in kol_j:
+        con.execute("ALTER TABLE jurnal ADD COLUMN uraian_buku TEXT")
+    kol_b = {r["name"] for r in con.execute("PRAGMA table_info(jurnal_baris)").fetchall()}
+    for kol in ("tempat", "dana"):
+        if kol_b and kol not in kol_b:
+            con.execute(f"ALTER TABLE jurnal_baris ADD COLUMN {kol} TEXT")
+    con.execute("UPDATE akun SET nama='Kas Bendahara Pengeluaran Pembantu — BOK' WHERE kode='1.1.1.01' AND nama LIKE 'Kas di Bendahara Pengeluaran%'")
+    # Pejabat pembuat BKU (data dari contoh BKU Agustus 2026); ditambahkan bila belum ada
+    for peran, nama, nip, pangkat, jabatan in PEJABAT_BKU:
+        if con.execute("SELECT COUNT(*) c FROM pejabat").fetchone()["c"] and not con.execute("SELECT 1 FROM pejabat WHERE peran=?", (peran,)).fetchone():
+            con.execute("INSERT INTO pejabat(peran,nama,nip,pangkat,jabatan) VALUES(?,?,?,?,?)", (peran, nama, nip, pangkat, jabatan))
     for k, v, ket in PENGATURAN_BARU:  # database lama: tambahkan pengaturan baru bila belum ada
         con.execute("INSERT OR IGNORE INTO pengaturan(kunci,nilai,keterangan) VALUES(?,?,?)", (k, v, ket))
     con.commit()

@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import Response
 
 from . import dokumen as dk
-from .core import Gagal, akses_sumber, auth, get_db
+from .core import Gagal, akses_sumber, akses_uang, auth, get_db
 from .surat import DOCX, _pdf_ke_docx
 
 router = APIRouter(prefix="/api/rekap-dinas")
@@ -26,6 +26,8 @@ def _data(db, user, tahun, bulan=0, sumber="", pegawai_id=0, lokasi_id=0, q=""):
         penuh = user["role"] != "pegawai" and akses_sumber(user, r["dana"], "baca")
         if not penuh and r["pegawai_id"] != user.get("pegawai_id"):
             continue
+        if not akses_uang(user, r["dana"]):
+            r["realisasi"], r["spj_status"], r["no_bukti"] = 0, None, None
         r["bulan"] = int(r["mulai"][5:7])
         r["hari"] = (dt.date.fromisoformat(r["selesai"]) - dt.date.fromisoformat(r["mulai"])).days + 1
         if (bulan and r["bulan"] != bulan) or (sumber and r["dana"] != sumber) or (pegawai_id and r["pegawai_id"] != pegawai_id) or (lokasi_id and r["lokasi_id"] != lokasi_id):

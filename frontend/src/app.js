@@ -54,7 +54,7 @@ const MENU = [
   ['Beranda', [['dashboard', 'Dashboard']]],
   ['Anggaran', [['bok', 'Pagu Anggaran BOK'], ['dau', 'Pagu Anggaran DAU'], ['blud', 'Pagu Anggaran BLUD'], ['rencana', 'Perencanaan (RPK/POA)']]],
   ['Dinas Luar', [['jadwal', 'Jadwal Dinas Luar'], ['st', 'Surat (ST, SPD & Nomor)'], ['rekap', 'Rekap Perjalanan Dinas']]],
-  ['Keuangan', [['spj', 'Realisasi & SPJ'], ['akun', 'Akuntansi & Laporan Keuangan']]],
+  ['Keuangan', [['spj', 'Realisasi & SPJ'], ['bku', 'Buku Kas Umum (BKU)'], ['akun', 'Akuntansi & Laporan Keuangan']]],
   ['Master Data', [['pegawai', 'Pegawai'], ['sumber_dana', 'Sumber Dana'], ['lokasi', 'Lokasi Tujuan'], ['tarif', 'Tarif Perbup'], ['pejabat', 'Pejabat'], ['libur', 'Hari Libur'], ['cuti', 'Cuti Pegawai'], ['pengaturan', 'Pengaturan & Kop']]],
   ['Alat', [['kalkulator', 'Kalkulator Biaya'], ['riwayat', 'Riwayat Perubahan'], ['data', 'Backup & Ekspor']]],
   ['Sistem', [['users', 'Pengguna']]],
@@ -62,7 +62,7 @@ const MENU = [
 function buildNav() {
   let h = '';
   for (const [g, items] of MENU) {
-    const vis = items.filter(([k]) => !(S.user.role === 'pembuat_surat' && !['dashboard', 'jadwal', 'st', 'rekap', 'kalkulator'].includes(k))).filter(([k]) => S.meta[k] || (['kalkulator', 'data', 'rencana', 'jadwal', 'nomor'].includes(k) && S.bisaBaca) || k === 'dashboard' || k === 'st' || k === 'spj' || k === 'rekap' || (k === 'akun' && S.akuntansi) || (['bok', 'dau', 'blud'].includes(k) && S.akses[k.toUpperCase()].baca) || (k === 'riwayat' && (S.bisaTulis || S.user.role === 'bendahara_blud')));
+    const vis = items.filter(([k]) => !(S.user.role === 'pembuat_surat' && !['dashboard', 'rencana', 'jadwal', 'st', 'rekap', 'kalkulator'].includes(k))).filter(([k]) => S.meta[k] || (['kalkulator', 'data', 'rencana', 'jadwal', 'nomor'].includes(k) && S.bisaBaca) || k === 'dashboard' || k === 'st' || k === 'spj' || (k === 'bku' && ['kepala', 'bendahara', 'bendahara_blud'].includes(S.user.role)) || k === 'rekap' || (k === 'akun' && S.akuntansi) || (['bok', 'dau', 'blud'].includes(k) && S.akses[k.toUpperCase()].baca) || (k === 'riwayat' && (S.bisaTulis || S.user.role === 'bendahara_blud')));
     if (!vis.length) continue;
     h += `<h4>${g}</h4>` + vis.map(([k, l]) => `<a data-k="${k}">${l}</a>`).join('');
   }
@@ -79,6 +79,7 @@ async function route() {
     else if (k === 'st') await viewSurat(m);
     else if (k === 'spj') await viewSpj(m);
     else if (k === 'rekap') await viewRekap(m);
+    else if (k === 'bku') await viewBku(m);
     else if (k === 'akun' && S.akuntansi) await viewAkun(m);
     else if (k === 'nomor') { S.stTab = 'nomor'; location.hash = 'st'; }
     else if (!S.bisaBaca) m.innerHTML = `<div class="card"><h2>Selamat datang, ${esc(S.user.nama)}</h2><p class="muted">Jadwal, Surat Tugas, dan rincian uang Anda akan tampil di sini pada tahap berikutnya.</p></div>`;
@@ -299,9 +300,9 @@ async function viewRencana(m) {
   const aksi = r => {
     const b = (a, l, c = '') => `<button class="btn small ${c}" data-a="${a}" data-id="${r.id}">${l}</button>`;
     if (r.status === 'Draft' && r.bisa_ubah) return [b('ubah', 'Ubah'), b('ajukan', 'Ajukan', 'primary'), b('hapus', 'Hapus', 'danger')].join(' ');
-    if (r.status === 'Diajukan') return [r.bisa_ubah ? b('tarik', 'Tarik') : '', (kepala || (!S.kepalaWajib && rw)) ? b('setuju', 'Setujui', 'primary') + ' ' + b('tolak', 'Tolak', 'danger') : ''].join(' ');
+    if (r.status === 'Diajukan') return [r.bisa_ubah ? b('tarik', 'Tarik') : '', (S.bisaSetuju && rw) ? b('setuju', 'Setujui', 'primary') + ' ' + b('tolak', 'Tolak', 'danger') : ''].join(' ');
     if (r.status === 'Ditolak' && r.bisa_ubah) return b('revisi', 'Revisi');
-    if (r.status === 'Disetujui' && (kepala || (!S.kepalaWajib && rw))) return b('batal', 'Batalkan persetujuan');
+    if (r.status === 'Disetujui' && S.bisaSetuju && rw) return b('batal', 'Batalkan persetujuan');
     return '';
   };
   const baris = list.map(r => `<tr><td>${BLN[r.bulan - 1].slice(0, 3)}</td>
@@ -425,7 +426,7 @@ async function viewJadwal(m) {
   const aksi = j => {
     const a = [];
     if (j.status === 'Diusulkan' && j.bisa_ubah) a.push(['Ubah', () => formJadwal(j), '']);
-    const setuju = kepala || (!S.kepalaWajib && rw);
+    const setuju = S.bisaSetuju && rw;
     if (!j.no_st && rw && ['Diusulkan', 'Disetujui'].includes(j.status) && (j.status === 'Disetujui' || setuju)) a.push(['Buat Surat Tugas', () => { S.stTab = 'siap'; location.hash = 'st'; }, 'primary']);
     if (j.status === 'Diusulkan' && setuju) a.push(['Setujui', () => ubahStatus(j, 'Disetujui'), 'primary'], ['Tolak', () => alasanStatus(j, 'Ditolak'), 'danger']);
     if ((j.status === 'Diusulkan' && j.bisa_ubah) || (j.status === 'Disetujui' && setuju)) a.push(['Batalkan', () => alasanStatus(j, 'Dibatalkan'), 'danger']);
@@ -633,6 +634,69 @@ async function viewDashboard(m) {
    ${k ? `<div class="card"><b>Ringkasan keuangan (s.d. ${BLN[k.bulan - 1]} ${T}, semua sumber)</b><div class="cards"><div class="card"><small>Pendapatan (LRA)</small><b>${rp(k.pendapatan)}</b></div><div class="card"><small>Belanja (LRA)</small><b>${rp(k.belanja)}</b></div><div class="card"><small>Surplus/(defisit) LRA</small><b>${rp(k.surplus_lra)}</b></div><div class="card"><small>Surplus/(defisit) LO</small><b>${rp(k.surplus_lo)}</b></div><div class="card"><small>Saldo kas</small><b>${rp(k.kas)}</b></div><div class="card"><small>Total aset</small><b>${rp(k.aset)}</b></div></div>
      <p class="muted" style="margin:0">${k.seimbang ? '✔ Neraca seimbang.' : '⚠ Neraca belum seimbang — periksa saldo awal/jurnal.'} <a href="#akun">Buka laporan keuangan →</a></p></div>` : ''}`;
   $('#dbTh').onchange = e => { S.bokTahun = Number(e.target.value) || T; viewDashboard(m); };
+}
+
+// ---------- Buku Kas Umum (BKU) ----------
+S.bkBuku = ''; S.bkBulan = new Date().getMonth() + 1;
+const idr = n => Number(n || 0).toLocaleString('id-ID');
+async function viewBku(m) {
+  const T = S.bokTahun, daftar = await api('/api/bku/daftar');
+  if (!daftar.length) { m.innerHTML = '<div class="card">Anda tidak memiliki akses ke buku kas.</div>'; return; }
+  if (!daftar.find(b => b.kode === S.bkBuku)) S.bkBuku = daftar[0].kode;
+  const B = daftar.find(b => b.kode === S.bkBuku);
+  const D = await api(`/api/bku?buku=${S.bkBuku}&tahun=${T}&bulan=${S.bkBulan}`);
+  const fm = D.buku.format, tulis = D.bisa_tulis, blud = fm === 'blud';
+  const q = `buku=${S.bkBuku}&tahun=${T}&bulan=${S.bkBulan}`;
+  const kolA = blud ? 'Pendapatan' : 'Penerimaan', kolB = blud ? 'Belanja' : 'Pengeluaran';
+  const seksi = D.seksi.map(x => {
+    const sdPen = blud ? x.sd_pen + D.saldo_awal_tahun : x.sd_pen;
+    return `<div class="card" style="margin-bottom:12px"><b>${BLN[x.bulan - 1]} ${T}</b>
+     <div class="tbl-wrap"><table><thead><tr><th>No</th><th>Tanggal</th><th>${blud ? 'No. Bukti' : 'Kode Rekening / Bukti'}</th><th>Uraian</th><th>${kolA}</th><th>${kolB}</th><th></th></tr></thead><tbody>
+      <tr class="grp"><td>${x.nomor_awal || ''}</td><td>${tglID(x.awal)}</td><td></td><td><i>${blud ? 'Saldo Bulan Lalu' : 'Saldo Awal'}</i></td><td class="num">${blud ? '' : 'Rp ' + idr(x.saldo_awal)}</td><td class="num">${blud ? '' : '0'}</td><td class="num">${blud ? 'Rp ' + idr(x.saldo_awal) : ''}</td></tr>
+      ${x.baris.map(r => `<tr><td>${r.urut}</td><td style="white-space:nowrap">${tglID(r.tanggal)}</td><td style="font-size:.85em">${esc(r.no_bukti || (blud ? r.urut + '/BKU/' + (r.pen && !r.peng ? 'D' : 'K') : ''))}</td><td>${esc(r.uraian)}</td><td class="num">${r.pen ? idr(r.pen) : ''}</td><td class="num">${r.peng ? idr(r.peng) : ''}</td>
+        <td>${tulis && !r.otomatis ? `<button class="btn small danger" data-hbku="${r.jid}">Hapus</button>` : r.otomatis ? '<span class="muted" style="font-size:.75em">dari SPJ</span>' : ''}</td></tr>`).join('') || '<tr><td colspan="7" class="muted">Tidak ada transaksi.</td></tr>'}
+      <tr class="grp"><td colspan="4"><b>Jumlah bulan ini${blud ? '' : ' (tanpa saldo awal)'}</b></td><td class="num"><b>${idr(x.pen)}</b></td><td class="num"><b>${idr(x.peng)}</b></td><td class="num"><b>${blud ? idr(x.pen - x.peng) : ''}</b></td></tr>
+      <tr><td colspan="4">Jumlah sampai dengan bulan lalu</td><td class="num">${idr(blud ? x.lalu_pen + D.saldo_awal_tahun : x.saldo_awal)}</td><td class="num">${idr(blud ? x.lalu_peng : 0)}</td><td></td></tr>
+      <tr><td colspan="4"><b>${blud ? 'Jumlah sampai dengan bulan ini' : 'Total (saldo awal + penerimaan) / pengeluaran'}</b></td><td class="num"><b>${idr(blud ? sdPen : x.saldo_awal + x.pen)}</b></td><td class="num"><b>${idr(blud ? x.sd_peng : x.peng)}</b></td><td></td></tr>
+      <tr class="grp"><td colspan="4"><b>${fm === 'penerimaan' ? 'Sisa kas' : 'Sisa / saldo'}</b></td><td colspan="3" class="num"><b>${idr(blud ? sdPen - x.sd_peng : x.saldo_awal + x.pen - x.peng)}</b></td></tr></tbody></table></div></div>`;
+  }).join('');
+  const rin = blud && D.rincian ? `<div class="card"><b>Rincian saldo akhir periode</b><div class="tbl-wrap"><table><thead><tr><th>Tempat</th><th>Jenis dana</th><th>Jumlah</th></tr></thead><tbody>${D.rincian.map(r => `<tr><td>${r.tempat}</td><td>${r.dana}</td><td class="num">${idr(r.jumlah)}</td></tr>`).join('')}</tbody></table></div></div>` : '';
+  m.innerHTML = `<h2>Buku Kas Umum (BKU)</h2>
+   <p class="muted">Format mengikuti buku kas Puskesmas Melati. Pembayaran SPJ otomatis masuk; transaksi lain (pendapatan, setor, bunga giro, Qris) dicatat di sini.</p>
+   <div class="tabs">${daftar.map(b => `<button class="tab ${b.kode === S.bkBuku ? 'on' : ''}" data-bk="${b.kode}">${b.kode === 'RETRIBUSI' ? 'Retribusi (Penerimaan)' : b.kode}</button>`).join('')}</div>
+   <div class="bar"><label style="display:flex;gap:6px;align-items:center">Tahun <input id="bkTh" type="number" value="${T}" style="width:90px"></label>
+    <select id="bkBln"><option value="0" ${S.bkBulan === 0 ? 'selected' : ''}>Tahunan</option>${BLN.map((b, i) => `<option value="${i + 1}" ${S.bkBulan === i + 1 ? 'selected' : ''}>${b}</option>`).join('')}</select>
+    ${tulis ? '<button class="btn primary" id="bkBaru">+ Catat transaksi</button><button class="btn" id="bkAwal">Saldo awal</button>' : ''}<span style="flex:1"></span>
+    <a class="btn small" href="/api/bku/dok?${q}&format=pdf" target="_blank">PDF</a><button class="btn small" data-bkd="docx">DOCX</button><button class="btn small" data-bkd="xlsx">XLSX</button></div>
+   <div class="cards"><div class="card"><small>${B.nama}</small><b>${esc(D.pejabat.bendahara.nama)}</b></div><div class="card"><small>Saldo awal ${T}</small><b>${rp(D.saldo_awal_tahun)}</b></div><div class="card"><small>Saldo akhir periode</small><b>${rp(D.akhir)}</b></div></div>
+   ${seksi}${rin}`;
+  const reload = () => viewBku(m);
+  $('#bkTh').onchange = e => { S.bokTahun = Number(e.target.value) || T; reload(); };
+  $('#bkBln').onchange = e => { S.bkBulan = Number(e.target.value); reload(); };
+  m.querySelectorAll('[data-bk]').forEach(b => b.onclick = () => { S.bkBuku = b.dataset.bk; reload(); });
+  m.querySelectorAll('[data-bkd]').forEach(b => b.onclick = () => download(`/api/bku/dok?${q}&format=${b.dataset.bkd}`, `BKU_${S.bkBuku}_${T}${S.bkBulan ? '_' + String(S.bkBulan).padStart(2, '0') : '_tahunan'}.${b.dataset.bkd}`));
+  m.querySelectorAll('[data-hbku]').forEach(b => b.onclick = () => dialog('Hapus transaksi?', '<p>Transaksi BKU manual ini akan dihapus (tercatat di riwayat).</p>', async () => { await api('/api/bku/transaksi/' + b.dataset.hbku, { method: 'DELETE' }); toast('Dihapus.'); await reload(); }, 'Hapus'));
+  if ($('#bkAwal')) $('#bkAwal').onclick = async () => {
+    const sa = await api(`/api/bku/saldo-awal?buku=${S.bkBuku}&tahun=${T}`);
+    const baris = (r, i) => `<div style="display:grid;grid-template-columns:1fr 1.2fr 1.3fr;gap:6px;margin-top:4px"><select name="t${i}">${sa.tempat.map(x => `<option ${r.tempat === x ? 'selected' : ''}>${x}</option>`).join('')}</select><select name="d${i}">${sa.dana.map(x => `<option ${r.dana === x ? 'selected' : ''}>${x}</option>`).join('')}</select><input name="j${i}" type="number" min="0" value="${r.jumlah || ''}" placeholder="Jumlah"></div>`;
+    const isi = blud ? (sa.baris.length ? sa.baris : [{}]).concat([{}, {}, {}]).slice(0, Math.max(sa.baris.length + 2, 4)) : [{ jumlah: sa.total }];
+    dialog(`Saldo awal ${B.nama} — ${T}`, `<p class="muted">Saldo kas pada 1 Januari ${T}. ${blud ? 'Rinci per tempat (Bank / Kas) dan jenis dana agar rincian saldo pada BKU benar.' : ''}</p>${blud ? isi.map(baris).join('') : `<label>Saldo awal (Rp)<input name="j0" type="number" min="0" value="${sa.total || ''}"></label>`}`,
+      async d => { const b = isi.map((_, i) => ({ jumlah: d['j' + i], tempat: blud ? d['t' + i] : null, dana: blud ? d['d' + i] : null })); await api('/api/bku/saldo-awal', { method: 'PUT', body: { buku: S.bkBuku, tahun: T, baris: b } }); toast('Saldo awal tersimpan.'); await reload(); });
+  };
+  if ($('#bkBaru')) $('#bkBaru').onclick = async () => {
+    const akun = (await api('/api/bku/akun').catch(() => [])).filter(a => a.aktif && !a.kas);
+    const kodeAkun = (jenis) => akun.filter(a => jenis === 'pen' ? a.jenis === 'PENDAPATAN' : !['PENDAPATAN'].includes(a.jenis)).map(a => `<option value="${a.id}">${a.kode} ${esc(a.nama)}</option>`).join('');
+    const lain = daftar.filter(b => b.kode !== S.bkBuku && b.tulis);
+    dialog(`Catat transaksi — ${B.nama}`, `<label>Jenis<select name="jenis" id="bkJenis"><option value="penerimaan">${kolA}</option><option value="pengeluaran">${kolB}</option><option value="pindah">Setor / pindah ke buku lain</option><option value="teruskan">Terima lalu teruskan ke buku lain (mis. Qris)</option></select></label>
+      <div class="grid2"><label>Tanggal<input name="tanggal" type="date" value="${new Date().toISOString().slice(0, 10)}" required></label><label>Jumlah (Rp)<input name="jumlah" type="number" min="1" required></label></div>
+      <label>Uraian<input name="uraian" required minlength="3"></label><label>No. bukti / kode rekening (opsional)<input name="no_bukti"></label>
+      <div id="bkLawan"><label>Akun lawan<select name="akun_lawan_id" id="bkAkun">${kodeAkun('pen')}</select></label></div>
+      <div id="bkKe" hidden><label>Buku tujuan<select name="ke_buku">${lain.map(b => `<option>${b.kode}</option>`).join('')}</select></label><label>Uraian pada buku tujuan (opsional)<input name="uraian_tujuan" placeholder="mis. Qris : Jasa Pelayanan Bulan Agustus 2026"></label></div>
+      ${blud || S.bkBuku === 'RETRIBUSI' ? `<div class="grid2"><label>Tempat dana (BLUD)<select name="tempat"><option value="">— Bank —</option>${['Bank', 'Kas JKN', 'Kas Lain-lain', 'Panjar'].map(x => `<option>${x}</option>`).join('')}</select></label><label>Jenis dana (BLUD)<select name="dana"><option value="">— Pelayanan Umum —</option>${['JKN Kapitasi', 'JKN Non Kapitasi', 'Pelayanan Umum'].map(x => `<option>${x}</option>`).join('')}</select></label></div>` : ''}`,
+      async d => { await api('/api/bku/transaksi', { method: 'POST', body: { ...d, buku: S.bkBuku } }); toast('Transaksi tercatat.'); await reload(); });
+    const f = $('#dlgForm'), ubah = () => { const j = f.elements.jenis.value; $('#bkLawan').hidden = j === 'pindah'; $('#bkKe').hidden = !['pindah', 'teruskan'].includes(j); $('#bkAkun').innerHTML = kodeAkun(j === 'pengeluaran' ? 'bel' : 'pen'); };
+    f.elements.jenis.onchange = ubah;
+  };
 }
 
 // ---------- Rekap Perjalanan Dinas ----------
@@ -955,7 +1019,7 @@ async function viewSurat(m) {
    <p class="muted">${penuhRole ? 'ST dan SPD dibuat dari jadwal yang sudah disetujui. Ekspor <b>DOCX Srikandi</b> memakai templat resmi (kode tanda tangan elektronik dibiarkan untuk diisi Srikandi). Setelah terbit, isi ST <b>terkunci</b>; perubahan hanya lewat pembatalan + terbit ulang.' : 'Surat Tugas dan SPD Anda.'}</p>
    ${tab === 'nomor' ? '' : `<div class="bar"><label style="display:flex;gap:6px;align-items:center">Tahun <input id="sTh" type="number" value="${T}" style="width:90px"></label></div>`}
    ${penuhRole ? `<div class="tabs"><button class="tab ${tab === 'terbit' ? 'on' : ''}" data-tab="terbit">Surat Tugas &amp; SPD (${daftar.length})</button><button class="tab ${tab === 'siap' ? 'on' : ''}" data-tab="siap">Siap diterbitkan (${siap.length})</button><button class="tab ${tab === 'nomor' ? 'on' : ''}" data-tab="nomor">Nomor surat umum &amp; kode</button></div>` : ''}
-   ${tab === 'nomor' ? '<div id="nomorBox"></div>' : tab === 'siap' ? (siap.length ? `<div class="bar"><span class="muted">${S.kepalaWajib ? 'Hanya jadwal yang sudah disetujui Kepala.' : 'Persetujuan Kepala opsional: Anda mengotorisasi sendiri saat menerbitkan.'}</span><span style="flex:1"></span><button class="btn primary" id="terbitMassal">Terbitkan yang dipilih</button></div><div class="tbl-wrap"><table><thead><tr><th><input type="checkbox" id="siapSemua" title="Pilih semua"></th><th>Tanggal</th><th>Kegiatan</th><th>Lokasi</th><th>Petugas</th><th>Dana</th><th></th></tr></thead><tbody>
+   ${tab === 'nomor' ? '<div id="nomorBox"></div>' : tab === 'siap' ? (siap.length ? `<div class="bar"><span class="muted">${S.bisaSetuju ? 'Anda berhak menyetujui: jadwal yang masih diusulkan ikut tampil dan disetujui otomatis saat ST diterbitkan.' : 'Hanya jadwal yang sudah disetujui yang tampil (persetujuan Kepala/Pembuat Surat diwajibkan).'}</span><span style="flex:1"></span><button class="btn primary" id="terbitMassal">Terbitkan yang dipilih</button></div><div class="tbl-wrap"><table><thead><tr><th><input type="checkbox" id="siapSemua" title="Pilih semua"></th><th>Tanggal</th><th>Kegiatan</th><th>Lokasi</th><th>Petugas</th><th>Dana</th><th></th></tr></thead><tbody>
       ${siap.map(j => `<tr><td><input type="checkbox" class="siapPilih" value="${j.id}"></td><td style="white-space:nowrap">${tglID(j.mulai)}${j.selesai !== j.mulai ? '<br>s.d. ' + tglID(j.selesai) : ''}</td><td>${esc(j.kegiatan)}</td><td>${esc(j.lokasi)}</td><td>${j.petugas.map(x => esc(nm(x))).join(', ')}</td><td>${esc(j.dana)}</td>
        <td><button class="btn small primary" data-terbit="${j.id}">Terbitkan ST</button></td></tr>`).join('')}</tbody></table></div>`
       : '<div class="card"><p>Tidak ada jadwal Disetujui yang menunggu Surat Tugas.</p><p class="muted">Jadwal harus berstatus <b>Disetujui</b> (oleh Kepala) dan Anda harus berwenang atas sumber dananya. Pengelola Program tidak menerbitkan ST.</p></div>')
@@ -1010,8 +1074,8 @@ async function viewSurat(m) {
           ${x.srikandi.final ? `<a class="btn small" href="/api/st/${id}/final" target="_blank">Lihat PDF final</a>` : ''}${x.nomor_srikandi ? '' : '<button type="button" class="btn small" data-aksi="nomor">Catat nomor Srikandi</button>'}</div>
         <p class="muted" style="font-size:.82em;margin:4px 0">Alur: unduh DOCX → unggah ke Srikandi → setelah ditandatangani, unggah PDF hasilnya di sini. Nomor naskah dibaca otomatis dari PDF bila terdeteksi (Anda yang mengonfirmasi).</p>` : ''}
       ${!aktif && x.srikandi.final ? `<a class="btn small" href="/api/st/${id}/final" target="_blank">Lihat PDF final</a>` : ''}
-      ${x.penuh ? `<h4 style="margin:12px 0 4px">Ekspor ke Srikandi</h4><div class="acts">${aktif ? L('srikandi', '⬇ DOCX Srikandi (ST + SPD)', 'primary') : '<span class="muted">ST dibatalkan — tidak dapat diekspor.</span>'}</div>
-        <p class="muted" style="font-size:.82em;margin:4px 0">Unggah berkas ini ke Srikandi; kode <code>\${nomor_naskah}</code>, <code>\${ttd_pengirim1/2}</code>, dst. diisi Srikandi saat TTE.</p>` : ''}
+      ${x.penuh ? `<h4 style="margin:12px 0 4px">Ekspor ke Srikandi</h4><div class="acts">${aktif ? `<button type="button" class="btn small primary" data-d="srikandi">⬇ DOCX Srikandi (ST + SPD)</button> <button type="button" class="btn small primary" data-d="srikandi_pdf">⬇ PDF Srikandi (ST + SPD)</button>` : '<span class="muted">ST dibatalkan — tidak dapat diekspor.</span>'}</div>
+        <p class="muted" style="font-size:.82em;margin:4px 0">Unggah salah satu berkas (DOCX atau PDF) ke Srikandi; kode <code>\${nomor_naskah}</code>, <code>\${ttd_pengirim1/2}</code>, dst. diisi Srikandi saat TTE.</p>` : ''}
       <h4 style="margin:12px 0 4px">Cetak / pratinjau (PDF)</h4><div class="acts">${L('st', 'Surat Tugas')}${L('spd', 'SPD')}${L('rincian', 'Rincian biaya')}${x.penuh ? L('paket', 'Paket ST+SPD+Rincian') : ''}</div>
       ${x.penuh ? `<div class="acts" style="margin-top:6px">${L('kuitansi', 'Kuitansi')}${L('hadir', 'Daftar hadir')}${L('riil', 'Pengeluaran riil')}${L('batal', 'Pernyataan pembatalan')}${L('kembali', 'Pernyataan pengembalian biaya')}${L('lengkap', 'Semua dokumen')}</div>` : ''}
       ${x.penuh && aktif ? `<div class="acts" style="margin-top:14px;border-top:1px solid var(--line);padding-top:10px">${x.bisa_batal ? '<button type="button" class="btn small danger" data-aksi="batal">Batalkan ST</button>' : ''}</div>` : ''}`);
@@ -1030,6 +1094,7 @@ async function viewSurat(m) {
       const b = e.target.closest('[data-d],[data-aksi],[data-spj]'); if (!b) return;
       if (b.dataset.spj) { $('#dlg').close(); bukaSpj(Number(b.dataset.spj), reload).catch(er => toast(er.message, 1)); return; }
       if (b.dataset.d === 'srikandi') { download(docUrl(id, 'srikandi'), `ST_SPD_Srikandi_${x.nomor_urut}.docx`); return; }
+      if (b.dataset.d === 'srikandi_pdf') { download(docUrl(id, 'srikandi_pdf'), `ST_SPD_Srikandi_${x.nomor_urut}.pdf`); return; }
       if (b.dataset.d && b.dataset.f === 'docx') { download(docUrl(id, b.dataset.d) + '&format=docx', `${b.dataset.d.toUpperCase()}_${x.nomor_urut}.docx`); return; }
       if (b.dataset.d) { window.open(docUrl(id, b.dataset.d), '_blank'); return; }
       $('#dlg').close();
@@ -1111,7 +1176,7 @@ function viewData(m) {
 async function start() {
   try {
     const m = await api('/api/meta');
-    S.meta = m.meta; S.user = m.user; S.bisaTulis = m.bisaTulis; S.bisaBaca = m.bisaBaca; S.akses = m.akses; S.kepalaWajib = m.kepalaWajib; S.akuntansi = m.akuntansi;
+    S.meta = m.meta; S.user = m.user; S.bisaTulis = m.bisaTulis; S.bisaBaca = m.bisaBaca; S.akses = m.akses; S.kepalaWajib = m.kepalaWajib; S.bisaSetuju = m.bisaSetuju; S.akuntansi = m.akuntansi;
   } catch { return showLogin(); }
   $('#login').hidden = true; $('#app').hidden = false;
   $('#who').textContent = `${S.user.nama} · ${ROLE[S.user.role]}`;

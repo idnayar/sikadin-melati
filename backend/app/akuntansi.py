@@ -8,7 +8,7 @@ from fastapi import APIRouter, Body, Depends
 from .core import Gagal, audit, auth, get_db
 
 router = APIRouter(prefix="/api/akun")
-KAS_BLUD, KAS_BOK = "1.1.1.02", "1.1.1.01"
+KAS_BLUD, KAS_BOK, KAS_DAU, KAS_RETRIBUSI = "1.1.1.02", "1.1.1.01", "1.1.1.04", "1.1.1.03"
 
 
 def pastikan(user: dict) -> dict:
@@ -29,7 +29,7 @@ def _akun(db, kode):
 
 
 def kode_kas(dana: str) -> str:
-    return KAS_BLUD if str(dana).upper() == "BLUD" else KAS_BOK
+    return {"BLUD": KAS_BLUD, "DAU": KAS_DAU, "RETRIBUSI": KAS_RETRIBUSI}.get(str(dana).upper(), KAS_BOK)
 
 
 def peta_belanja(jenis_belanja: str) -> str:
@@ -63,18 +63,19 @@ def _int(v, nama="Jumlah") -> int:
     return n
 
 
-def buat_jurnal(db, user, tanggal, uraian, basis, baris, sumber_id=None, no_bukti=None, ref=(None, None)) -> int:
-    """baris = [(akun_id, debit, kredit)]. Wajib seimbang dan minimal dua baris."""
-    baris = [(a, int(d or 0), int(k or 0)) for a, d, k in baris if int(d or 0) or int(k or 0)]
+def buat_jurnal(db, user, tanggal, uraian, basis, baris, sumber_id=None, no_bukti=None, ref=(None, None), uraian_buku=None) -> int:
+    """baris = [(akun_id, debit, kredit[, tempat, dana])]. Wajib seimbang dan minimal dua baris. uraian_buku = {kode_buku: uraian} untuk BKU."""
+    import json as _json
+    baris = [(b[0], int(b[1] or 0), int(b[2] or 0), *((tuple(b[3:5]) + (None, None))[:2])) for b in baris if int(b[1] or 0) or int(b[2] or 0)]
     if len(baris) < 2:
         raise Gagal("Jurnal minimal memuat dua baris bernilai.")
     td, tk = sum(b[1] for b in baris), sum(b[2] for b in baris)
     if td != tk:
         raise Gagal(f"Jurnal tidak seimbang: debit {td:,} ≠ kredit {tk:,}.".replace(",", "."))
-    jid = db.execute("INSERT INTO jurnal(tahun,tanggal,no_bukti,uraian,basis,sumber_dana_id,ref_jenis,ref_id,dibuat_oleh) VALUES(?,?,?,?,?,?,?,?,?)",
-                     (int(tanggal[:4]), tanggal, no_bukti, uraian, basis, sumber_id, ref[0], ref[1], user["username"])).lastrowid
-    for a, d, k in baris:
-        db.execute("INSERT INTO jurnal_baris(jurnal_id,akun_id,debit,kredit) VALUES(?,?,?,?)", (jid, a, d, k))
+    jid = db.execute("INSERT INTO jurnal(tahun,tanggal,no_bukti,uraian,basis,sumber_dana_id,ref_jenis,ref_id,uraian_buku,dibuat_oleh) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                     (int(tanggal[:4]), tanggal, no_bukti, uraian, basis, sumber_id, ref[0], ref[1], _json.dumps(uraian_buku, ensure_ascii=False) if uraian_buku else None, user["username"])).lastrowid
+    for a, d, k, tp, dn in baris:
+        db.execute("INSERT INTO jurnal_baris(jurnal_id,akun_id,debit,kredit,tempat,dana) VALUES(?,?,?,?,?,?)", (jid, a, d, k, tp, dn))
     return jid
 
 
@@ -86,7 +87,8 @@ def jurnal_spj_bayar(db, user, spj: dict) -> None:
     b = db.execute("SELECT jenis_belanja FROM bok_baris WHERE id=?", (spj["baris_id"],)).fetchone()
     beban = _akun(db, peta_belanja(b["jenis_belanja"] if b else ""))
     kas = _akun(db, kode_kas(spj["dana"]))
-    buat_jurnal(db, user, spj["tanggal_bayar"], f"SPJ {spj['uraian']}", "KAS", [(beban["id"], spj["total"], 0), (kas["id"], 0, spj["total"])],
+    nama = spj.get("pegawai_nama") or spj.get("penerima")
+    buat_jurnal(db, user, spj["tanggal_bayar"], f"Pembayaran {spj['uraian']}" + (f" An. {nama}" if nama else ""), "KAS", [(beban["id"], spj["total"], 0), (kas["id"], 0, spj["total"])],
                 spj["sumber_dana_id"], spj.get("no_bukti"), ("SPJ", spj["id"]))
 
 
@@ -210,9 +212,9 @@ def catat_pendapatan(body: dict = Body(default={}), user=Depends(akses), db=Depe
 # ---------------------------------------------------------------- saldo awal & anggaran pendapatan
 @router.get("/saldo-awal")
 def lihat_saldo_awal(tahun: int, user=Depends(akses), db=Depends(get_db)):
-    ada = {r["akun_id"]: r for r in db.execute("SELECT b.akun_id, SUM(b.debit) debit, SUM(b.kredit) kredit FROM jurnal_baris b JOIN jurnal j ON j.id=b.jurnal_id WHERE j.basis='AWAL' AND j.tahun=? GROUP BY b.akun_id", (tahun,)).fetchall()}
+    ada = {r["akun_id"]: r for r in db.execute("SELECT b.akun_id, SUM(b.debit) debit, SUM(b.kredit) kredit FROM jurnal_baris b JOIN jurnal j ON j.id=b.jurnal_id WHERE j.basis='AWAL' AND j.ref_jenis IS NULL AND j.tahun=? GROUP BY b.akun_id", (tahun,)).fetchall()}
     return [{**a, "debit": ada.get(a["id"], {}).get("debit", 0), "kredit": ada.get(a["id"], {}).get("kredit", 0)}
-            for a in db.execute("SELECT id, kode, nama, jenis, normal FROM akun WHERE jenis IN ('ASET','KEWAJIBAN','EKUITAS') AND aktif=1 ORDER BY kode").fetchall()]
+            for a in db.execute("SELECT id, kode, nama, jenis, normal FROM akun WHERE jenis IN ('ASET','KEWAJIBAN','EKUITAS') AND kas=0 AND aktif=1 ORDER BY kode").fetchall()]
 
 
 @router.put("/saldo-awal")
@@ -223,9 +225,9 @@ def simpan_saldo_awal(body: dict = Body(default={}), user=Depends(akses), db=Dep
         raise Gagal("Tahun tidak valid.")
     nilai = []
     for x in body.get("saldo") or []:
-        a = db.execute("SELECT * FROM akun WHERE id=? AND jenis IN ('ASET','KEWAJIBAN','EKUITAS')", (x.get("akun_id"),)).fetchone()
+        a = db.execute("SELECT * FROM akun WHERE id=? AND jenis IN ('ASET','KEWAJIBAN','EKUITAS') AND kas=0", (x.get("akun_id"),)).fetchone()
         if not a:
-            raise Gagal("Saldo awal hanya untuk akun Aset, Kewajiban, dan Ekuitas.")
+            raise Gagal("Saldo awal hanya untuk akun Aset (non-kas), Kewajiban, dan Ekuitas. Saldo awal kas diisi di menu Buku Kas Umum.")
         v = _int(x.get("saldo") or 0, f"Saldo {a['nama']}")
         if v:
             nilai.append((a, v))
@@ -233,7 +235,7 @@ def simpan_saldo_awal(body: dict = Body(default={}), user=Depends(akses), db=Dep
     pasiva = sum(v for a, v in nilai if a["jenis"] != "ASET")
     if aset != pasiva:
         raise Gagal(f"Saldo awal tidak seimbang: Aset {aset:,} ≠ Kewajiban + Ekuitas {pasiva:,}.".replace(",", "."))
-    lama = db.execute("SELECT id FROM jurnal WHERE basis='AWAL' AND tahun=?", (tahun,)).fetchall()
+    lama = db.execute("SELECT id FROM jurnal WHERE basis='AWAL' AND ref_jenis IS NULL AND tahun=?", (tahun,)).fetchall()
     for j in lama:
         db.execute("DELETE FROM jurnal WHERE id=?", (j["id"],))
     if nilai:
