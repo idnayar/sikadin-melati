@@ -230,12 +230,14 @@ def _blok_ttd(isi: dict, st: dict, mode: str, label: str | None = None, dengan_t
         kanan.append(P(esc(label), "n"))
     kanan.append(P(esc(t["jabatan"]), "n"))
     if sr:
-        kanan += [P(TOKEN_PENGIRIM, "n"), P(TOKEN_NAMA, "n")]
+        # Srikandi mengganti ${ttd_pengirim} dengan gambar QR (± 2,5 cm, berpusat di baris kode): beri ruang kosong
+        # di atas & bawah agar QR tidak menimpa teks; kode hanya SATU (di kolom kanan, rata dengan nama).
+        kanan += [Spacer(1, 1.35 * cm * _SKALA.get()), P(TOKEN_PENGIRIM, "n"), Spacer(1, 1.35 * cm * _SKALA.get()), P(TOKEN_NAMA, "n")]
     else:
         kanan += [Spacer(1, 1.9 * cm * _SKALA.get()), P(f"<u>{esc(t['nama'])}</u>", "n")]
     if t.get("nip"):
         kanan.append(P(f"NIP {esc(t['nip'])}", "n"))
-    kiri = [Spacer(1, 1.2 * cm * _SKALA.get()), P(TOKEN_TTD if sr else "", "n")]
+    kiri = [Spacer(1, 1 * _SKALA.get())]
     o = Table([[kiri, kanan]], colWidths=[7.4 * cm, 9.3 * cm])
     o.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 0), ("LEFTPADDING", (1, 0), (1, 0), 0.2 * cm)]))
     return o
