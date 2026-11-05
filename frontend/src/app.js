@@ -51,9 +51,9 @@ function dialog(judul, bodyHtml, onSave, saveLabel = 'Simpan') {
 
 // ---------- navigasi ----------
 const MENU = [
-  ['Anggaran', [['bok', 'Pagu Anggaran BOK'], ['rencana', 'Perencanaan (RPK/POA)']]],
+  ['Anggaran', [['bok', 'Pagu Anggaran BOK'], ['pagu', 'Pagu Anggaran DAU & BLUD'], ['rencana', 'Perencanaan (RPK/POA)']]],
   ['Dinas Luar', [['jadwal', 'Jadwal Dinas Luar']]],
-  ['Master Data', [['pegawai', 'Pegawai'], ['sumber_dana', 'Sumber Dana'], ['pagu', 'Pagu DAU / BLUD'], ['lokasi', 'Lokasi Tujuan'], ['tarif', 'Tarif Perbup'], ['pejabat', 'Pejabat'], ['libur', 'Hari Libur'], ['cuti', 'Cuti Pegawai'], ['pengaturan', 'Pengaturan & Kop']]],
+  ['Master Data', [['pegawai', 'Pegawai'], ['sumber_dana', 'Sumber Dana'], ['lokasi', 'Lokasi Tujuan'], ['tarif', 'Tarif Perbup'], ['pejabat', 'Pejabat'], ['libur', 'Hari Libur'], ['cuti', 'Cuti Pegawai'], ['pengaturan', 'Pengaturan & Kop']]],
   ['Alat', [['kalkulator', 'Kalkulator Biaya'], ['riwayat', 'Riwayat Perubahan'], ['data', 'Backup & Ekspor']]],
   ['Sistem', [['users', 'Pengguna']]],
 ];
