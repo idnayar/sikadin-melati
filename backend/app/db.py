@@ -184,6 +184,56 @@ BEGIN SELECT RAISE(ABORT, 'SPJ_TIDAK_BOLEH_DIHAPUS'); END;
 """
 
 
+SCHEMA_AKUN = """
+-- Tahap 6: akuntansi BLU (PSAP 13). Satu buku besar untuk semua sumber dana (laporan keuangan satu kesatuan).
+-- lra: pemetaan akun non-beban/pendapatan ke LRA ('BELANJA_MODAL' = debit dihitung belanja modal; 'PEMBIAYAAN' = kredit penerimaan, debit pengeluaran pembiayaan).
+CREATE TABLE IF NOT EXISTS akun(
+  id INTEGER PRIMARY KEY, kode TEXT NOT NULL UNIQUE, nama TEXT NOT NULL,
+  jenis TEXT NOT NULL CHECK(jenis IN ('ASET','KEWAJIBAN','EKUITAS','PENDAPATAN','BEBAN')),
+  normal TEXT NOT NULL CHECK(normal IN ('D','K')), kas INTEGER NOT NULL DEFAULT 0, arus TEXT NOT NULL DEFAULT 'OPERASI' CHECK(arus IN ('OPERASI','INVESTASI','PENDANAAN')),
+  lra TEXT CHECK(lra IN ('BELANJA_MODAL','PEMBIAYAAN')), aktif INTEGER NOT NULL DEFAULT 1);
+CREATE TABLE IF NOT EXISTS jurnal(
+  id INTEGER PRIMARY KEY, tahun INTEGER NOT NULL, tanggal TEXT NOT NULL, no_bukti TEXT, uraian TEXT NOT NULL,
+  basis TEXT NOT NULL CHECK(basis IN ('AWAL','KAS','AKRUAL')), sumber_dana_id INTEGER REFERENCES sumber_dana(id),
+  ref_jenis TEXT, ref_id INTEGER, dibuat_oleh TEXT, dibuat_pada TEXT DEFAULT (datetime('now','localtime')));
+CREATE INDEX IF NOT EXISTS ix_jurnal_tahun ON jurnal(tahun, tanggal);
+CREATE INDEX IF NOT EXISTS ix_jurnal_ref ON jurnal(ref_jenis, ref_id);
+CREATE TABLE IF NOT EXISTS jurnal_baris(
+  id INTEGER PRIMARY KEY, jurnal_id INTEGER NOT NULL REFERENCES jurnal(id) ON DELETE CASCADE, akun_id INTEGER NOT NULL REFERENCES akun(id),
+  debit INTEGER NOT NULL DEFAULT 0 CHECK(debit >= 0), kredit INTEGER NOT NULL DEFAULT 0 CHECK(kredit >= 0), CHECK(debit = 0 OR kredit = 0));
+CREATE TABLE IF NOT EXISTS anggaran_pendapatan(
+  id INTEGER PRIMARY KEY, tahun INTEGER NOT NULL, akun_id INTEGER NOT NULL REFERENCES akun(id), jumlah INTEGER NOT NULL DEFAULT 0 CHECK(jumlah >= 0), UNIQUE(tahun, akun_id));
+CREATE TABLE IF NOT EXISTS calk(tahun INTEGER NOT NULL, bagian TEXT NOT NULL, isi TEXT NOT NULL DEFAULT '', PRIMARY KEY(tahun, bagian));
+"""
+
+# (kode, nama, jenis, normal, kas, arus, lra)
+AKUN_AWAL = [
+    ("1.1.1.01", "Kas di Bendahara Pengeluaran (BOK/DAU)", "ASET", "D", 1, "OPERASI", None),
+    ("1.1.1.02", "Kas BLUD (Kas pada BLU)", "ASET", "D", 1, "OPERASI", None),
+    ("1.1.2.01", "Piutang Jasa Layanan", "ASET", "D", 0, "OPERASI", None),
+    ("1.1.3.01", "Persediaan Obat dan BMHP", "ASET", "D", 0, "OPERASI", None),
+    ("1.1.4.01", "Belanja Dibayar di Muka", "ASET", "D", 0, "OPERASI", None),
+    ("1.3.2.01", "Peralatan dan Mesin", "ASET", "D", 0, "INVESTASI", "BELANJA_MODAL"),
+    ("1.3.3.01", "Gedung dan Bangunan", "ASET", "D", 0, "INVESTASI", "BELANJA_MODAL"),
+    ("1.3.9.01", "Akumulasi Penyusutan", "ASET", "K", 0, "OPERASI", None),
+    ("2.1.1.01", "Utang Belanja", "KEWAJIBAN", "K", 0, "OPERASI", None),
+    ("2.1.2.01", "Pendapatan Diterima di Muka", "KEWAJIBAN", "K", 0, "OPERASI", None),
+    ("2.1.3.01", "Utang Jangka Pendek Lainnya", "KEWAJIBAN", "K", 0, "PENDANAAN", "PEMBIAYAAN"),
+    ("3.1.1.01", "Ekuitas", "EKUITAS", "K", 0, "OPERASI", None),
+    ("4.1.1.01", "Pendapatan Jasa Layanan dari Masyarakat", "PENDAPATAN", "K", 0, "OPERASI", None),
+    ("4.1.1.02", "Pendapatan Jasa Layanan dari JKN (Kapitasi/Non-Kapitasi)", "PENDAPATAN", "K", 0, "OPERASI", None),
+    ("4.2.1.01", "Pendapatan Transfer DAU", "PENDAPATAN", "K", 0, "OPERASI", None),
+    ("4.2.2.01", "Pendapatan Transfer BOK (DAK Non Fisik)", "PENDAPATAN", "K", 0, "OPERASI", None),
+    ("4.9.9.01", "Pendapatan Lain-lain", "PENDAPATAN", "K", 0, "OPERASI", None),
+    ("5.1.1.01", "Belanja/Beban Pegawai dan Jasa Pelayanan", "BEBAN", "D", 0, "OPERASI", None),
+    ("5.1.2.01", "Belanja/Beban Barang dan Jasa", "BEBAN", "D", 0, "OPERASI", None),
+    ("5.1.2.02", "Belanja/Beban Perjalanan Dinas", "BEBAN", "D", 0, "OPERASI", None),
+    ("5.1.2.03", "Belanja/Beban Obat dan BMHP", "BEBAN", "D", 0, "OPERASI", None),
+    ("5.1.3.01", "Beban Penyusutan", "BEBAN", "D", 0, "OPERASI", None),
+    ("5.1.9.01", "Beban Lain-lain", "BEBAN", "D", 0, "OPERASI", None),
+]
+
+
 JENIS_NOMOR_AWAL = [
     ("ST-BOK", "Surat Tugas & SPD — BOK", "000.1.2.3", "PKM.MELATI.BOK", "000.1.2.3 = Perjalanan Dinas Pegawai (Permendagri 83/2022). Seri nomor khusus BOK."),
     ("ST-DAU", "Surat Tugas & SPD — DAU", "000.1.2.3", "PKM.MELATI.DAU", "Seri nomor khusus DAU."),
@@ -193,6 +243,7 @@ JENIS_NOMOR_AWAL = [
 
 # Pengaturan yang ditambahkan setelah rilis awal (ditambahkan otomatis ke database lama)
 PENGATURAN_BARU = [
+    ("kepala_wajib", "0", "1 = rencana/jadwal harus disetujui Kepala; 0 (bawaan) = persetujuan Kepala opsional, pembuat surat/penjadwalan dapat mengotorisasi sendiri (tercatat di riwayat)"),
     ("spj_setelah_selesai", "1", "1 = SPJ perjalanan dinas baru boleh diajukan setelah tanggal selesai kegiatan; 0 = boleh kapan saja"),
     ("batas_persen_ruangan", "50", "Maks. % pegawai satu ruangan yang boleh meninggalkan ruangan (dinas luar/cuti) pada hari yang sama"),
     ("ruangan_hitung_cuti", "1", "1 = pegawai cuti dihitung sebagai tidak berada di ruangan; 0 = hanya dinas luar yang dihitung"),
@@ -273,6 +324,9 @@ def init_db() -> None:
     con = connect()
     con.executescript(SCHEMA)
     con.executescript(SCHEMA_SPJ)
+    con.executescript(SCHEMA_AKUN)
+    for a in AKUN_AWAL:
+        con.execute("INSERT OR IGNORE INTO akun(kode,nama,jenis,normal,kas,arus,lra) VALUES(?,?,?,?,?,?,?)", a)
     # Migrasi database lama: pagu & menu RAB kini per sumber dana (data lama = BOK)
     bok = (con.execute("SELECT id FROM sumber_dana WHERE kode='BOK'").fetchone() or {}).get("id")
     if "sumber_dana_id" not in {r["name"] for r in con.execute("PRAGMA table_info(bok_pagu)").fetchall()}:

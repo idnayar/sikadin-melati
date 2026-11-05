@@ -87,6 +87,20 @@ Dibuat dari **jadwal yang sudah disetujui** (menu Surat Tugas & SPD). Satu ST + 
 - Petugas hanya melihat/mengisi SPJ miliknya. BLUD hanya Kepala + Bendahara BLUD. Menu **Realisasi & SPJ** memuat tab Realisasi anggaran (pagu, proses, realisasi, sisa, serapan per menu/rincian/baris).
 - Ekspor: bukti SPJ (PDF/DOCX), rekap SPJ dibayar per sumber/bulan (PDF/DOCX/XLSX).
 
+## Surat dalam satu modul, Kepala opsional (Tahap 4–5 disederhanakan)
+- Menu **Surat** memuat tiga tab: *Surat Tugas & SPD*, *Siap diterbitkan* (dengan **terbit massal** berisian bawaan), dan *Nomor surat umum & kode*.
+- **Persetujuan Kepala opsional** (pengaturan `kepala_wajib`, bawaan 0). Pembuat surat (Pengelola Program/Bendahara/Kepala; BLUD hanya Kepala + Bendahara BLUD) menyetujui rencana & jadwalnya sendiri dan mengotorisasi ST saat menerbitkan; semuanya tercatat di riwayat. Set `kepala_wajib` = 1 untuk mewajibkan persetujuan Kepala.
+- **ST terbit → SPJ otomatis** (satu draft per petugas) dan tersambung ke realisasi belanja: daftar ST menampilkan status SPJ & nilai dibayar; pembatalan ST menghapus SPJ draft dan **ditolak** bila ada SPJ diajukan/dibayar.
+
+## Rekap perjalanan dinas
+Menu *Rekap Perjalanan Dinas*: per nama, tempat, waktu, tujuan, biaya (SPD) dan realisasi (SPJ dibayar) — setahun & per bulan; filter bulan/sumber/pegawai/tempat/teks; ekspor PDF/DOCX/XLSX. Pegawai hanya melihat miliknya; BLUD tetap terbatas.
+
+## Akuntansi & Laporan Keuangan (Tahap 6, PSAP 13)
+- Buku besar satu kesatuan (DAU, BOK, BLUD): bagan akun, jurnal (KAS/AKRUAL/AWAL), saldo awal, anggaran pendapatan. **Hanya Kepala + Bendahara BLUD.**
+- SPJ dibayar otomatis menjadi jurnal kas (Dr belanja / Cr kas); koreksi pembayaran membuat jurnal balik. Penerimaan pendapatan dicatat lewat menu (Dr kas / Cr pendapatan).
+- Tujuh laporan: LRA, L-SAL, Neraca, LO, LAK (metode langsung), LPE, CaLK, dengan kolom tahun lalu pada LRA/LO/Neraca; pemeriksaan integritas (jurnal seimbang, Neraca seimbang, LPE = Neraca). Ekspor PDF/DOCX/XLSX.
+- LRA/LAK berbasis kas (jurnal KAS); LO/Neraca/LPE dari semua jurnal. Anggaran belanja LRA = total RAB per jenis belanja.
+
 ## Penomoran surat
 Pola mengikuti contoh Srikandi: `klasifikasi/yymm-urut/unit/bulan-romawi/tahun`, mis. `000.1.2.3/2611-001/PKM.MELATI.BOK/XI/2026`.
 Klasifikasi arsip: Permendagri 83/2022 (000.1.2.3 = Perjalanan Dinas Pegawai; 000 = Umum); tata naskah: Permendagri 1/2023.

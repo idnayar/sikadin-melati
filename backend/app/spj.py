@@ -9,6 +9,7 @@ import json
 from fastapi import APIRouter, Body, Depends
 from fastapi.responses import Response
 
+from . import akuntansi, sinkron
 from . import dokumen as dk
 from .core import Gagal, akses_sumber, audit, auth, cek_sumber, get_db
 from .surat import DOCX, _pdf_ke_docx
@@ -152,15 +153,7 @@ def dari_spd(spd_id: int, user=Depends(auth), db=Depends(get_db)):
     ada = db.execute("SELECT id FROM spj WHERE spd_id=?", (spd_id,)).fetchone()
     if ada:
         return {"id": ada["id"], "sudah_ada": True}
-    biaya = json.loads(d["biaya_json"])
-    rinci = [{"uraian": b["uraian"], "volume": b["volume"], "satuan": b["satuan"], "tarif": b["tarif"], "rencana": int(b["jumlah"]), "jumlah": int(b["jumlah"]), "bukti": ""} for b in biaya["baris"]]
-    tot = sum(x["jumlah"] for x in rinci)
-    sid = db.execute("""INSERT INTO spj(jenis,tahun,sumber_dana_id,baris_id,spd_id,st_id,pegawai_id,tanggal,mulai,selesai,uraian,penerima,rincian_json,total_rencana,total,dibuat_oleh)
-        VALUES('SPD',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                     (d["tahun"], d["sumber_dana_id"], d["baris_id"], spd_id, d["st_id"], d["pegawai_id"], d["selesai"], d["mulai"], d["selesai"],
-                      f"Perjalanan dinas: {d['kegiatan']}", d["pegawai"], json.dumps(rinci, ensure_ascii=False), tot, tot, user["username"])).lastrowid
-    audit(db, user, "spj", sid, "BUAT", None, {"jenis": "SPD", "spd_id": spd_id, "total": tot}, d["dana"])
-    return {"id": sid, "sudah_ada": False}
+    return {"id": sinkron.buat_spj_dari_spd(db, user, spd_id), "sudah_ada": False}
 
 
 @router.post("")
@@ -405,6 +398,7 @@ def ubah_status(sid: int, body: dict = Body(default={}), user=Depends(auth), db=
     db.execute(f"UPDATE spj SET {','.join(k + '=?' for k in sets)} WHERE id=?", (*sets.values(), sid))
     if ke == "Dibayar":
         _sinkron_jadwal(db, r["st_id"])
+        akuntansi.jurnal_spj_bayar(db, user, {**r, **sets})
     audit(db, user, "spj", sid, f"STATUS {dari}->{ke}", {"status": dari}, {"status": ke, "alasan": alasan or None, "total": r["total"]}, r["dana"])
     return {"ok": True, "status": ke, "no_bukti": sets.get("no_bukti")}
 
@@ -423,6 +417,7 @@ def koreksi(sid: int, body: dict = Body(default={}), user=Depends(auth), db=Depe
         raise Gagal("Alasan koreksi wajib diisi (min. 5 huruf).")
     db.execute("UPDATE spj SET status='Diverifikasi', no_bukti=NULL, tanggal_bayar=NULL, dibayar_oleh=NULL, dibayar_pada=NULL WHERE id=?", (sid,))
     _sinkron_jadwal(db, r["st_id"])
+    akuntansi.jurnal_spj_koreksi(db, user, r)
     audit(db, user, "spj", sid, "KOREKSI PEMBAYARAN", {"status": "Dibayar", "no_bukti": r["no_bukti"], "tanggal_bayar": r["tanggal_bayar"], "total": r["total"]}, {"status": "Diverifikasi", "alasan": alasan}, r["dana"])
     return {"ok": True}
 

@@ -9,7 +9,8 @@ from fastapi.responses import Response
 
 from . import dokumen as dk
 from .calc import hitung
-from .core import Gagal, akses_sumber, audit, auth, cek_sumber, get_db, kode_sd, perlu_baca
+from .core import Gagal, akses_sumber, audit, auth, cek_sumber, get_db, kepala_wajib, kode_sd, perlu_baca
+from . import sinkron
 from .docx_srikandi import isi_templat
 from .penomoran import bentuk_nomor, nomor_berikut, pasang_nomor
 from .docx_srikandi import cek_muat
@@ -77,8 +78,8 @@ def siap(tahun: int, user=Depends(perlu_baca), db=Depends(get_db)):
     """Jadwal Disetujui yang belum punya ST aktif. Hanya yang boleh diterbitkan pengguna (Kepala; bendahara sesuai sumber dana)."""
     rows = db.execute("""SELECT j.id, j.rencana_id, j.kegiatan, j.mulai, j.selesai, j.lokasi_id, l.nama lokasi, sd.kode dana
         FROM jadwal j JOIN lokasi l ON l.id=j.lokasi_id JOIN sumber_dana sd ON sd.id=j.sumber_dana_id
-        WHERE j.tahun=? AND j.status='Disetujui' AND NOT EXISTS(SELECT 1 FROM surat_tugas s WHERE s.jadwal_id=j.id AND s.status='Terbit') ORDER BY j.mulai, j.id""", (tahun,)).fetchall()
-    rows = [r for r in rows if akses_sumber(user, r["dana"], "pagu")]
+        WHERE j.tahun=? AND j.status IN ('Disetujui'%s) AND NOT EXISTS(SELECT 1 FROM surat_tugas s WHERE s.jadwal_id=j.id AND s.status='Terbit') ORDER BY j.mulai, j.id""" % ("" if kepala_wajib(db) else ",'Diusulkan'"), (tahun,)).fetchall()
+    rows = [r for r in rows if akses_sumber(user, r["dana"], "rencana")]
     for r in rows:
         r["petugas"] = [x["nama"] for x in db.execute("SELECT p.nama FROM jadwal_petugas jp JOIN pegawai p ON p.id=jp.pegawai_id WHERE jp.jadwal_id=? ORDER BY p.nama", (r["id"],)).fetchall()]
     return rows
@@ -87,7 +88,7 @@ def siap(tahun: int, user=Depends(perlu_baca), db=Depends(get_db)):
 @router.get("/draft/{jid}")
 def draft(jid: int, user=Depends(perlu_baca), db=Depends(get_db)):
     j = _jadwal_info(db, jid)
-    cek_sumber(user, j["dana"], "pagu")
+    cek_sumber(user, j["dana"], "rencana")
     tanggal = dt.date.today().isoformat()
     if tanggal > j["mulai"]:
         tanggal = j["mulai"]
@@ -102,9 +103,13 @@ def draft(jid: int, user=Depends(perlu_baca), db=Depends(get_db)):
 @router.post("/terbit")
 def terbit(body: dict = Body(default={}), user=Depends(perlu_baca), db=Depends(get_db)):
     j = _jadwal_info(db, int(body.get("jadwal_id") or 0))
-    cek_sumber(user, j["dana"], "pagu")
+    cek_sumber(user, j["dana"], "rencana")   # pembuat surat mengotorisasi sendiri; persetujuan Kepala opsional
+    if j["status"] == "Diusulkan" and not kepala_wajib(db):
+        db.execute("UPDATE jadwal SET status='Disetujui', diputuskan_oleh=?, diputuskan_pada=datetime('now','localtime') WHERE id=?", (user["username"], j["id"]))
+        audit(db, user, "jadwal", j["id"], "STATUS", {"status": "Diusulkan"}, {"status": "Disetujui", "catatan": "diotorisasi pembuat surat saat menerbitkan ST"}, j["dana"])
+        j["status"] = "Disetujui"
     if j["status"] != "Disetujui":
-        raise Gagal(f"Jadwal berstatus {j['status']}; hanya jadwal Disetujui yang dapat diterbitkan Surat Tugasnya.")
+        raise Gagal(f"Jadwal berstatus {j['status']}; hanya jadwal Disetujui" + ("" if not kepala_wajib(db) else " (oleh Kepala)") + " yang dapat diterbitkan Surat Tugasnya.")
     if db.execute("SELECT 1 FROM surat_tugas WHERE jadwal_id=? AND status='Terbit'", (j["id"],)).fetchone():
         raise Gagal("Jadwal ini sudah punya Surat Tugas aktif. Batalkan dulu bila perlu terbit ulang.")
     try:
@@ -154,8 +159,36 @@ def terbit(body: dict = Body(default={}), user=Depends(perlu_baca), db=Depends(g
         db.execute("UPDATE jadwal SET no_st=? WHERE id=?", (nomor, j["id"]))
     except sqlite3.IntegrityError:
         raise Gagal("Nomor surat bentrok dengan penerbitan lain yang bersamaan. Silakan coba lagi.")
+    spj_ids = [sinkron.buat_spj_dari_spd(db, user, x) for x in spd_ids]   # realisasi belanja tersambung sejak ST terbit
     audit(db, user, "surat_tugas", sid, "TERBIT", None, {"nomor": nomor, "jadwal_id": j["id"], "petugas": len(petugas), "versi": (prev["versi"] + 1) if prev else 1}, j["dana"])
-    return {"id": sid, "nomor": nomor, "spd": len(spd_ids)}
+    return {"id": sid, "nomor": nomor, "spd": len(spd_ids), "spj": len([x for x in spj_ids if x])}
+
+
+@router.post("/terbit-massal")
+def terbit_massal(body: dict = Body(default={}), user=Depends(perlu_baca), db=Depends(get_db)):
+    """Terbitkan banyak ST sekaligus dengan isian bawaan (dasar, maksud, DPA, penandatangan utama). Tiap jadwal berdiri sendiri: yang gagal tidak membatalkan yang lain."""
+    try:
+        ids = [int(x) for x in (body.get("jadwal_ids") or [])]
+    except (TypeError, ValueError):
+        raise Gagal("Daftar jadwal tidak valid.")
+    if not ids or len(ids) > 60:
+        raise Gagal("Pilih 1–60 jadwal.")
+    hasil = []
+    for jid in ids:
+        db.execute("SAVEPOINT tm")
+        try:
+            d = draft(jid, user, db)
+            if not d["pejabat"]:
+                raise Gagal("Belum ada pejabat penandatangan aktif (menu Pejabat).")
+            r = terbit({"jadwal_id": jid, "tanggal_surat": body.get("tanggal_surat") or d["tanggal_surat"], "dasar": d["dasar"], "maksud": d["maksud"], "dpa": d["dpa"],
+                        "penandatangan_id": body.get("penandatangan_id") or d["pejabat"][0]["id"]}, user, db)
+            db.execute("RELEASE tm")
+            hasil.append({"jadwal_id": jid, "kegiatan": d["kegiatan"], "ok": True, "nomor": r["nomor"], "id": r["id"]})
+        except Gagal as e:
+            db.execute("ROLLBACK TO tm")
+            db.execute("RELEASE tm")
+            hasil.append({"jadwal_id": jid, "ok": False, "error": e.pesan})
+    return {"hasil": hasil, "berhasil": sum(1 for x in hasil if x["ok"]), "gagal": sum(1 for x in hasil if not x["ok"])}
 
 
 @router.get("")
@@ -172,12 +205,15 @@ def daftar(tahun: int, status: str | None = None, user=Depends(auth), db=Depends
         boleh, penuh = _boleh_lihat(db, user, s)
         if not boleh:
             continue
-        sp = db.execute("SELECT d.id, d.pegawai_id, d.total, p.nama FROM spd d JOIN pegawai p ON p.id=d.pegawai_id WHERE d.st_id=? ORDER BY p.nama", (s["id"],)).fetchall()
+        sp = db.execute("""SELECT d.id, d.pegawai_id, d.total, p.nama, x.id spj_id, x.status spj_status, x.total spj_total, x.no_bukti spj_bukti, x.tanggal_bayar spj_tgl_bayar
+            FROM spd d JOIN pegawai p ON p.id=d.pegawai_id LEFT JOIN spj x ON x.spd_id=d.id WHERE d.st_id=? ORDER BY p.nama""", (s["id"],)).fetchall()
         if not penuh:   # petugas biasa: hanya SPD miliknya, tanpa biaya orang lain
             sp = [x for x in sp if x["pegawai_id"] == user.get("pegawai_id")]
         s["spd"] = sp
+        s["realisasi"] = {"dibayar": sum(x["spj_total"] or 0 for x in sp if x["spj_status"] == "Dibayar"), "rencana": sum(x["total"] for x in sp),
+                          "lunas": sum(1 for x in sp if x["spj_status"] == "Dibayar"), "petugas": len(sp)}
         s["penuh"] = penuh
-        s["bisa_batal"] = penuh and s["status"] == "Terbit" and akses_sumber(user, s["dana"], "pagu")
+        s["bisa_batal"] = penuh and s["status"] == "Terbit" and akses_sumber(user, s["dana"], "rencana")
         out.append(s)
     return out
 
@@ -188,16 +224,17 @@ def batal(sid: int, body: dict = Body(default={}), user=Depends(perlu_baca), db=
     if not s:
         raise Gagal("Surat Tugas tidak ditemukan.", 404)
     kode = kode_sd(db, s["sumber_dana_id"])
-    cek_sumber(user, kode, "pagu")
+    cek_sumber(user, kode, "rencana")
     if s["status"] != "Terbit":
         raise Gagal("Surat Tugas ini sudah dibatalkan.")
     alasan = str(body.get("alasan") or "").strip()
     if len(alasan) < 5:
         raise Gagal("Alasan pembatalan wajib diisi (min. 5 karakter).")
+    n_spj = sinkron.tutup_spj_st(db, user, sid, kode)
     db.execute("UPDATE surat_tugas SET status='Dibatalkan', alasan_batal=?, dibatalkan_oleh=?, dibatalkan_pada=datetime('now','localtime') WHERE id=?", (alasan, user["username"], sid))
     db.execute("UPDATE jadwal SET no_st=NULL WHERE id=?", (s["jadwal_id"],))
-    audit(db, user, "surat_tugas", sid, "BATAL", {"nomor": s["nomor"], "status": "Terbit"}, {"status": "Dibatalkan", "alasan": alasan}, kode)
-    return {"ok": 1}
+    audit(db, user, "surat_tugas", sid, "BATAL", {"nomor": s["nomor"], "status": "Terbit"}, {"status": "Dibatalkan", "alasan": alasan, "spj_dihapus": n_spj}, kode)
+    return {"ok": 1, "spj_dihapus": n_spj}
 
 
 @router.put("/{sid}/nomor-srikandi")
@@ -207,7 +244,7 @@ def nomor_srikandi(sid: int, body: dict = Body(default={}), user=Depends(perlu_b
     if not s:
         raise Gagal("Surat Tugas tidak ditemukan.", 404)
     kode = kode_sd(db, s["sumber_dana_id"])
-    cek_sumber(user, kode, "pagu")
+    cek_sumber(user, kode, "rencana")
     if s["status"] != "Terbit":
         raise Gagal("Surat Tugas sudah dibatalkan.")
     if s["nomor_srikandi"]:

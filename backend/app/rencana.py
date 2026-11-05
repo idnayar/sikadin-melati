@@ -5,7 +5,7 @@ import re
 from fastapi import APIRouter, Body, Depends
 
 from .calc import hitung
-from .core import Gagal, akses_sumber, audit, cek_sumber, get_db, kode_sd, perlu_baca, sumber_boleh
+from .core import Gagal, akses_sumber, audit, cek_sumber, get_db, kepala_wajib, kode_sd, perlu_baca, sumber_boleh
 
 router = APIRouter(prefix="/api/rencana")
 ALUR = {"Draft→Diajukan": "tulis", "Diajukan→Disetujui": "kepala", "Diajukan→Ditolak": "kepala",
@@ -250,8 +250,8 @@ def ubah_status(rid: int, body: dict = Body(default={}), user=Depends(perlu_baca
     syarat = ALUR.get(f"{lama['status']}→{ke}")
     if not syarat:
         raise Gagal(f"Perubahan status {lama['status']} → {ke} tidak diizinkan.")
-    if syarat == "kepala" and user["role"] != "kepala":
-        raise Gagal("Hanya Kepala Puskesmas yang dapat menyetujui/menolak.")
+    if syarat == "kepala" and user["role"] != "kepala" and kepala_wajib(db):
+        raise Gagal("Hanya Kepala Puskesmas yang dapat menyetujui/menolak (pengaturan «kepala_wajib» aktif).")
     if syarat == "tulis" and not bisa_ubah(db, user, lama):
         raise Gagal("Anda tidak berhak mengubah status rencana ini.")
     alasan = str(body.get("alasan") or "").strip()

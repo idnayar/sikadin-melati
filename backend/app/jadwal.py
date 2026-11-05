@@ -9,7 +9,7 @@ import sqlite3
 
 from fastapi import APIRouter, Body, Depends
 
-from .core import Gagal, akses_sumber, audit, cek_sumber, get_db, kode_sd, perlu_baca, sumber_boleh
+from .core import Gagal, akses_sumber, audit, cek_sumber, get_db, kepala_wajib, kode_sd, perlu_baca, sumber_boleh
 
 router = APIRouter(prefix="/api/jadwal")
 AKTIF = ("Diusulkan", "Disetujui", "Terlaksana")
@@ -587,7 +587,10 @@ def ubah_status(jid: int, body: dict = Body(default={}), user=Depends(perlu_baca
     if not ok:
         raise Gagal(f"Perubahan status {j['status']} → {ke} tidak diizinkan.")
     if ok == "kepala" and user["role"] != "kepala":
-        raise Gagal("Hanya Kepala Puskesmas yang dapat melakukan ini.", 403)
+        if kepala_wajib(db):
+            raise Gagal("Hanya Kepala Puskesmas yang dapat melakukan ini (pengaturan «kepala_wajib» aktif).", 403)
+        if not akses_sumber(user, kode, "rencana"):
+            raise Gagal("Anda tidak berwenang atas sumber dana ini.", 403)
     if ok == "tulis" and not _bisa_ubah(user, {**j, "dana": kode}):
         raise Gagal("Anda tidak berhak mengubah jadwal ini.", 403)
     if ke in ("Ditolak", "Dibatalkan") and not alasan:

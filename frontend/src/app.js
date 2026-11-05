@@ -52,8 +52,8 @@ function dialog(judul, bodyHtml, onSave, saveLabel = 'Simpan') {
 // ---------- navigasi ----------
 const MENU = [
   ['Anggaran', [['bok', 'Pagu Anggaran BOK'], ['dau', 'Pagu Anggaran DAU'], ['blud', 'Pagu Anggaran BLUD'], ['rencana', 'Perencanaan (RPK/POA)']]],
-  ['Dinas Luar', [['jadwal', 'Jadwal Dinas Luar'], ['st', 'Surat Tugas & SPD'], ['nomor', 'Penomoran Surat']]],
-  ['Keuangan', [['spj', 'Realisasi & SPJ']]],
+  ['Dinas Luar', [['jadwal', 'Jadwal Dinas Luar'], ['st', 'Surat (ST, SPD & Nomor)'], ['rekap', 'Rekap Perjalanan Dinas']]],
+  ['Keuangan', [['spj', 'Realisasi & SPJ'], ['akun', 'Akuntansi & Laporan Keuangan']]],
   ['Master Data', [['pegawai', 'Pegawai'], ['sumber_dana', 'Sumber Dana'], ['lokasi', 'Lokasi Tujuan'], ['tarif', 'Tarif Perbup'], ['pejabat', 'Pejabat'], ['libur', 'Hari Libur'], ['cuti', 'Cuti Pegawai'], ['pengaturan', 'Pengaturan & Kop']]],
   ['Alat', [['kalkulator', 'Kalkulator Biaya'], ['riwayat', 'Riwayat Perubahan'], ['data', 'Backup & Ekspor']]],
   ['Sistem', [['users', 'Pengguna']]],
@@ -61,11 +61,11 @@ const MENU = [
 function buildNav() {
   let h = '';
   for (const [g, items] of MENU) {
-    const vis = items.filter(([k]) => S.meta[k] || (['kalkulator', 'data', 'rencana', 'jadwal', 'nomor'].includes(k) && S.bisaBaca) || k === 'st' || k === 'spj' || (['bok', 'dau', 'blud'].includes(k) && S.akses[k.toUpperCase()].baca) || (k === 'riwayat' && (S.bisaTulis || S.user.role === 'bendahara_blud')));
+    const vis = items.filter(([k]) => S.meta[k] || (['kalkulator', 'data', 'rencana', 'jadwal', 'nomor'].includes(k) && S.bisaBaca) || k === 'st' || k === 'spj' || k === 'rekap' || (k === 'akun' && S.akuntansi) || (['bok', 'dau', 'blud'].includes(k) && S.akses[k.toUpperCase()].baca) || (k === 'riwayat' && (S.bisaTulis || S.user.role === 'bendahara_blud')));
     if (!vis.length) continue;
     h += `<h4>${g}</h4>` + vis.map(([k, l]) => `<a data-k="${k}">${l}</a>`).join('');
   }
-  if (!S.bisaBaca) h = '<h4>Dinas Luar</h4><a data-k="st">Surat Tugas &amp; SPD Saya</a><h4>Keuangan</h4><a data-k="spj">SPJ Saya</a>';
+  if (!S.bisaBaca) h = '<h4>Dinas Luar</h4><a data-k="st">Surat Tugas &amp; SPD Saya</a><a data-k="rekap">Rekap Perjalanan Saya</a><h4>Keuangan</h4><a data-k="spj">SPJ Saya</a>';
   $('#nav').innerHTML = h;
   $('#nav').onclick = e => { const k = e.target.dataset.k; if (k) { location.hash = k; $('#nav').classList.remove('open'); } };
 }
@@ -76,7 +76,9 @@ async function route() {
   try {
     if (k === 'st') await viewSurat(m);
     else if (k === 'spj') await viewSpj(m);
-    else if (k === 'nomor' && S.bisaBaca) await viewNomor(m);
+    else if (k === 'rekap') await viewRekap(m);
+    else if (k === 'akun' && S.akuntansi) await viewAkun(m);
+    else if (k === 'nomor') { S.stTab = 'nomor'; location.hash = 'st'; }
     else if (!S.bisaBaca) m.innerHTML = `<div class="card"><h2>Selamat datang, ${esc(S.user.nama)}</h2><p class="muted">Jadwal, Surat Tugas, dan rincian uang Anda akan tampil di sini pada tahap berikutnya.</p></div>`;
     else if (['bok', 'dau', 'blud'].includes(k)) await viewBok(m, k.toUpperCase());
     else if (k === 'rencana') await viewRencana(m);
@@ -295,9 +297,9 @@ async function viewRencana(m) {
   const aksi = r => {
     const b = (a, l, c = '') => `<button class="btn small ${c}" data-a="${a}" data-id="${r.id}">${l}</button>`;
     if (r.status === 'Draft' && r.bisa_ubah) return [b('ubah', 'Ubah'), b('ajukan', 'Ajukan', 'primary'), b('hapus', 'Hapus', 'danger')].join(' ');
-    if (r.status === 'Diajukan') return [r.bisa_ubah ? b('tarik', 'Tarik') : '', kepala ? b('setuju', 'Setujui', 'primary') + ' ' + b('tolak', 'Tolak', 'danger') : ''].join(' ');
+    if (r.status === 'Diajukan') return [r.bisa_ubah ? b('tarik', 'Tarik') : '', (kepala || (!S.kepalaWajib && rw)) ? b('setuju', 'Setujui', 'primary') + ' ' + b('tolak', 'Tolak', 'danger') : ''].join(' ');
     if (r.status === 'Ditolak' && r.bisa_ubah) return b('revisi', 'Revisi');
-    if (r.status === 'Disetujui' && kepala) return b('batal', 'Batalkan persetujuan');
+    if (r.status === 'Disetujui' && (kepala || (!S.kepalaWajib && rw))) return b('batal', 'Batalkan persetujuan');
     return '';
   };
   const baris = list.map(r => `<tr><td>${BLN[r.bulan - 1].slice(0, 3)}</td>
@@ -421,8 +423,10 @@ async function viewJadwal(m) {
   const aksi = j => {
     const a = [];
     if (j.status === 'Diusulkan' && j.bisa_ubah) a.push(['Ubah', () => formJadwal(j), '']);
-    if (j.status === 'Diusulkan' && kepala) a.push(['Setujui', () => ubahStatus(j, 'Disetujui'), 'primary'], ['Tolak', () => alasanStatus(j, 'Ditolak'), 'danger']);
-    if ((j.status === 'Diusulkan' && j.bisa_ubah) || (j.status === 'Disetujui' && kepala)) a.push(['Batalkan', () => alasanStatus(j, 'Dibatalkan'), 'danger']);
+    const setuju = kepala || (!S.kepalaWajib && rw);
+    if (!j.no_st && rw && ['Diusulkan', 'Disetujui'].includes(j.status) && (j.status === 'Disetujui' || setuju)) a.push(['Buat Surat Tugas', () => { S.stTab = 'siap'; location.hash = 'st'; }, 'primary']);
+    if (j.status === 'Diusulkan' && setuju) a.push(['Setujui', () => ubahStatus(j, 'Disetujui'), 'primary'], ['Tolak', () => alasanStatus(j, 'Ditolak'), 'danger']);
+    if ((j.status === 'Diusulkan' && j.bisa_ubah) || (j.status === 'Disetujui' && setuju)) a.push(['Batalkan', () => alasanStatus(j, 'Dibatalkan'), 'danger']);
     return a;
   };
   async function ubahStatus(j, ke, alasan) { await api(`/api/jadwal/${j.id}/status`, { method: 'POST', body: { ke, alasan } }); toast('Jadwal ' + ke.toLowerCase() + '.'); await reload(); }
@@ -597,6 +601,128 @@ async function viewJadwal(m) {
   }
 }
 
+// ---------- Rekap Perjalanan Dinas ----------
+S.rkTab = 'rincian'; S.rkBulan = 0; S.rkSumber = ''; S.rkPeg = 0; S.rkTempat = 0; S.rkQ = '';
+async function viewRekap(m) {
+  const T = S.bokTahun, penuh = S.bisaBaca;
+  const qs = `tahun=${T}&bulan=${S.rkBulan}&sumber=${S.rkSumber}&pegawai_id=${S.rkPeg}&lokasi_id=${S.rkTempat}&q=${encodeURIComponent(S.rkQ)}`;
+  const R = await api('/api/rekap-dinas?' + qs);
+  const sumberOk = ['BOK', 'DAU', 'BLUD'].filter(k => S.akses && S.akses[k].baca);
+  const t = R.total, tab = S.rkTab;
+  const head = x => `<th>${x}</th>`;
+  let isi = '';
+  if (tab === 'rincian') isi = `<div class="tbl-wrap"><table><thead><tr>${['No', 'Nama', 'Tempat', 'Tanggal', 'Hari', 'Tujuan', 'No. ST', 'Dana', 'Biaya SPD', 'Realisasi', 'SPJ'].map(head).join('')}</tr></thead><tbody>
+    ${R.rows.map((r, i) => `<tr><td>${i + 1}</td><td><b>${esc(r.nama)}</b></td><td>${esc(r.tempat)}</td><td style="white-space:nowrap">${tglID(r.mulai)}${r.selesai !== r.mulai ? '<br>s.d. ' + tglID(r.selesai) : ''}</td><td>${r.hari}</td><td>${esc(r.tujuan)}</td><td style="font-size:.8em">${esc(r.nomor_srikandi || r.nomor)}</td><td>${r.dana}</td><td class="num">${rp(r.rencana)}</td><td class="num">${rp(r.realisasi)}</td><td>${r.spj_status ? `<span class="badge ${SP_BADGE[r.spj_status]}">${r.spj_status}</span>` : '-'}</td></tr>`).join('') || '<tr><td colspan="11" class="muted">Tidak ada perjalanan dinas pada filter ini.</td></tr>'}
+    <tr class="grp"><td colspan="8"><b>Jumlah (${t.perjalanan} perjalanan-orang, ${t.st} ST)</b></td><td class="num"><b>${rp(t.rencana)}</b></td><td class="num"><b>${rp(t.realisasi)}</b></td><td></td></tr></tbody></table></div>`;
+  else if (tab === 'bulanan') isi = `<div class="tbl-wrap"><table><thead><tr>${['Bulan', 'Jumlah ST', 'Perjalanan (orang)', 'Hari (orang)', 'Biaya SPD', 'Realisasi'].map(head).join('')}</tr></thead><tbody>
+    ${R.bulanan.map(b => `<tr><td>${BLN[b.bulan - 1]}</td><td>${b.st}</td><td>${b.perjalanan}</td><td>${b.hari}</td><td class="num">${rp(b.rencana)}</td><td class="num">${rp(b.realisasi)}</td></tr>`).join('')}
+    <tr class="grp"><td><b>Jumlah</b></td><td><b>${t.st}</b></td><td><b>${t.perjalanan}</b></td><td><b>${t.hari}</b></td><td class="num"><b>${rp(t.rencana)}</b></td><td class="num"><b>${rp(t.realisasi)}</b></td></tr></tbody></table></div>`;
+  else if (tab === 'pegawai') isi = `<div class="tbl-wrap"><table><thead><tr><th>Nama</th>${BLN.map(b => `<th title="${b}">${b.slice(0, 3)}</th>`).join('')}<th>Perj.</th><th>Hari</th><th>Biaya SPD</th><th>Realisasi</th></tr></thead><tbody>
+    ${R.per_pegawai.map(p => `<tr><td><b>${esc(p.nama)}</b><br><span class="muted" style="font-size:.8em">${esc(p.ruangan || '')}</span></td>${p.bln_jml.map((n, i) => `<td title="${BLN[i]}: ${rp(p.bln_biaya[i])}" style="${n ? 'background:#dcfce7;font-weight:600' : 'color:#94a3b8'}">${n || '·'}</td>`).join('')}<td>${p.perjalanan}</td><td>${p.hari}</td><td class="num">${rp(p.rencana)}</td><td class="num">${rp(p.realisasi)}</td></tr>`).join('') || '<tr><td colspan="17" class="muted">Tidak ada data.</td></tr>'}</tbody></table></div>
+    <p class="muted" style="font-size:.85em">Angka per bulan = jumlah perjalanan (arahkan kursor untuk melihat biayanya).</p>`;
+  else isi = `<div class="tbl-wrap"><table><thead><tr>${['Tempat', 'Perjalanan (orang)', 'Hari (orang)', 'Biaya SPD', 'Realisasi'].map(head).join('')}</tr></thead><tbody>
+    ${R.per_tempat.map(x => `<tr><td><b>${esc(x.tempat)}</b></td><td>${x.perjalanan}</td><td>${x.hari}</td><td class="num">${rp(x.rencana)}</td><td class="num">${rp(x.realisasi)}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">Tidak ada data.</td></tr>'}</tbody></table></div>`;
+  m.innerHTML = `<h2>Rekap Perjalanan Dinas</h2>
+   <p class="muted">${penuh ? 'Per nama, tempat, waktu, tujuan, dan biaya — setahun dan per bulan. Biaya SPD = tarif Perbup; Realisasi = SPJ yang sudah dibayar.' : 'Perjalanan dinas Anda.'}</p>
+   <div class="bar"><label style="display:flex;gap:6px;align-items:center">Tahun <input id="rkTh" type="number" value="${T}" style="width:90px"></label>
+    <select id="rkBln"><option value="0">Setahun</option>${BLN.map((b, i) => `<option value="${i + 1}" ${S.rkBulan === i + 1 ? 'selected' : ''}>${b}</option>`).join('')}</select>
+    ${penuh ? `<select id="rkSd"><option value="">Semua sumber</option>${sumberOk.map(k => `<option ${S.rkSumber === k ? 'selected' : ''}>${k}</option>`).join('')}</select>
+    <select id="rkPeg"><option value="0">Semua pegawai</option>${R.pilihan.pegawai.map(x => `<option value="${x.id}" ${S.rkPeg === x.id ? 'selected' : ''}>${esc(x.nama)}</option>`).join('')}</select>
+    <select id="rkTmp"><option value="0">Semua tempat</option>${R.pilihan.tempat.map(x => `<option value="${x.id}" ${S.rkTempat === x.id ? 'selected' : ''}>${esc(x.nama)}</option>`).join('')}</select>
+    <input id="rkQ" placeholder="Cari tujuan / nama / tempat" value="${esc(S.rkQ)}" style="min-width:200px">` : ''}
+    <span style="flex:1"></span><a class="btn small" href="/api/rekap-dinas/dok?${qs}&format=pdf" target="_blank">PDF</a><button class="btn small" data-rk="docx">DOCX</button><button class="btn small" data-rk="xlsx">XLSX</button></div>
+   <div class="cards"><div class="card"><small>Surat Tugas</small><b>${t.st}</b></div><div class="card"><small>Perjalanan (orang)</small><b>${t.perjalanan}</b></div><div class="card"><small>Hari (orang)</small><b>${t.hari}</b></div><div class="card"><small>Biaya SPD</small><b>${rp(t.rencana)}</b></div><div class="card"><small>Realisasi dibayar</small><b>${rp(t.realisasi)}</b></div></div>
+   <div class="tabs">${[['rincian', 'Rincian'], ['bulanan', 'Per bulan'], ['pegawai', 'Per nama'], ['tempat', 'Per tempat']].map(([k, l]) => `<button class="tab ${tab === k ? 'on' : ''}" data-tab="${k}">${l}</button>`).join('')}</div>${isi}`;
+  const reload = () => viewRekap(m);
+  $('#rkTh').onchange = e => { S.bokTahun = Number(e.target.value) || T; reload(); };
+  $('#rkBln').onchange = e => { S.rkBulan = Number(e.target.value); reload(); };
+  if ($('#rkSd')) { $('#rkSd').onchange = e => { S.rkSumber = e.target.value; reload(); }; $('#rkPeg').onchange = e => { S.rkPeg = Number(e.target.value); reload(); }; $('#rkTmp').onchange = e => { S.rkTempat = Number(e.target.value); reload(); }; $('#rkQ').onchange = e => { S.rkQ = e.target.value.trim(); reload(); }; }
+  m.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { S.rkTab = b.dataset.tab; reload(); });
+  m.querySelectorAll('[data-rk]').forEach(b => b.onclick = () => download(`/api/rekap-dinas/dok?${qs}&format=${b.dataset.rk}`, `Rekap_Perjalanan_Dinas_${T}.${b.dataset.rk}`));
+}
+
+// ---------- Akuntansi & Laporan Keuangan (PSAP 13) ----------
+S.akTab = 'laporan'; S.akJenis = 'lra'; S.akBulan = 12;
+const LAP = [['lra', 'LRA'], ['lsal', 'L-SAL'], ['neraca', 'Neraca'], ['lo', 'LO'], ['lak', 'LAK'], ['lpe', 'LPE'], ['calk', 'CaLK']];
+const fl = n => n === null || n === undefined ? '' : n < 0 ? '(' + Math.abs(n).toLocaleString('id-ID') + ')' : n.toLocaleString('id-ID');
+const fx = (c, n) => c === '%' ? (n === null || n === undefined ? '' : String(n).replace('.', ',') + '%') : fl(n);
+async function viewAkun(m) {
+  const T = S.bokTahun, tab = S.akTab;
+  const reload = () => viewAkun(m);
+  let isi = '';
+  const dlBtns = (jenis) => { const sf = jenis ? ' ' + jenis.toUpperCase() : ' (semua)'; return `<a class="btn small" href="/api/laporan/dok?tahun=${T}&bulan=${S.akBulan}${jenis ? '&jenis=' + jenis : ''}&format=pdf" target="_blank">PDF${sf}</a><button class="btn small" data-lap="docx" data-j="${jenis}">DOCX${sf}</button><button class="btn small" data-lap="xlsx" data-j="${jenis}">XLSX${sf}</button>`; };
+  if (tab === 'laporan') {
+    const [rep, cek] = await Promise.all([api(`/api/laporan?tahun=${T}&bulan=${S.akBulan}&jenis=${S.akJenis}`), api(`/api/laporan/periksa?tahun=${T}&bulan=${S.akBulan}`)]);
+    const kol = rep.kolom;
+    isi = `${cek.ok ? '<div class="card" style="padding:8px;border-color:#86efac">✔ Pemeriksaan integritas: semua jurnal seimbang dan laporan saling cocok.</div>' : `<div class="card err" style="padding:8px">${cek.jurnal_tidak_seimbang.length ? 'Ada jurnal tidak seimbang. ' : ''}${cek.peringatan.map(esc).join('<br>')}</div>`}
+     <div class="tabs">${LAP.map(([k, l]) => `<button class="tab ${S.akJenis === k ? 'on' : ''}" data-jenis="${k}">${l}</button>`).join('')}</div>
+     <div class="card"><div style="text-align:center"><b>${esc(rep.judul)}</b><br><span class="muted">${esc(rep.periode)}${S.akJenis !== 'calk' ? ' · (dalam Rupiah)' : ''}</span></div>
+     ${S.akJenis === 'calk' ? `<div style="margin-top:8px">${rep.baris.map(r => r.teks ? `<p>${esc(r.teks)}</p>` : r.t ? `<p style="margin:10px 0 2px"><b>${esc(r.u)}</b></p>` : `<div style="display:flex;justify-content:space-between;padding:1px 0 1px ${r.lv * 14}px"><span>${esc(r.u)}</span><span>${fl(r.v[0])}</span></div>`).join('')}</div>`
+      : `<div class="tbl-wrap"><table><thead><tr><th>Uraian</th>${kol.map(k => `<th>${esc(k)}</th>`).join('')}</tr></thead><tbody>${rep.baris.map(r => `<tr class="${r.b && !r.t ? 'grp' : ''}"><td style="padding-left:${8 + r.lv * 16}px;${r.b ? 'font-weight:700' : ''}">${esc(r.u)}</td>${kol.map((c, i) => `<td class="num" style="${r.b ? 'font-weight:700' : ''}">${fx(c, r.v[i])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`}
+     ${(rep.catatan || []).map(c => `<p class="muted" style="font-size:.85em">* ${esc(c)}</p>`).join('')}</div>`;
+  } else if (tab === 'jurnal') {
+    const j = await api('/api/akun/jurnal?tahun=' + T);
+    isi = `<div class="bar"><button class="btn primary" id="akPend">+ Penerimaan pendapatan</button><button class="btn" id="akJur">+ Jurnal manual</button><span class="muted">SPJ yang dibayar otomatis menjadi jurnal kas.</span></div>
+     <div class="tbl-wrap"><table><thead><tr><th>Tanggal</th><th>Bukti</th><th>Uraian</th><th>Basis</th><th>Dana</th><th>Akun (D / K)</th><th>Jumlah</th><th></th></tr></thead><tbody>
+     ${j.map(x => `<tr><td style="white-space:nowrap">${tglID(x.tanggal)}</td><td style="font-size:.8em">${esc(x.no_bukti || '')}</td><td>${esc(x.uraian)}</td><td><span class="badge">${x.basis}</span></td><td>${x.dana || ''}</td>
+      <td style="font-size:.82em">${x.baris.map(b => `${b.debit ? 'D' : 'K'} ${esc(b.kode)} ${esc(b.nama)}`).join('<br>')}</td><td class="num">${rp(x.total)}</td><td>${x.ref_jenis || x.basis === 'AWAL' ? '<span class="muted" style="font-size:.8em">otomatis</span>' : `<button class="btn small danger" data-hj="${x.id}">Hapus</button>`}</td></tr>`).join('') || '<tr><td colspan="8" class="muted">Belum ada jurnal.</td></tr>'}</tbody></table></div>`;
+  } else if (tab === 'saldo') {
+    const sa = await api('/api/akun/saldo-awal?tahun=' + T);
+    isi = `<p class="muted">Saldo awal (neraca awal) tahun ${T}. Aset harus sama dengan Kewajiban + Ekuitas. Isi nilai positif pada sisi normal akun (akumulasi penyusutan diisi positif).</p>
+     <div class="tbl-wrap"><table><thead><tr><th>Kode</th><th>Akun</th><th>Jenis</th><th>Saldo awal (Rp)</th></tr></thead><tbody>${sa.map(a => `<tr><td>${a.kode}</td><td>${esc(a.nama)}</td><td>${a.jenis}</td><td><input type="number" min="0" class="saldo" data-a="${a.id}" data-j="${a.jenis}" data-n="${a.normal}" value="${a.debit || a.kredit || ''}" style="width:160px"></td></tr>`).join('')}</tbody></table></div>
+     <div class="bar"><span id="saldoCek" class="muted"></span><span style="flex:1"></span><button class="btn primary" id="saldoSimpan">Simpan saldo awal</button></div>`;
+  } else if (tab === 'anggaran') {
+    const an = await api('/api/akun/anggaran-pendapatan?tahun=' + T);
+    isi = `<p class="muted">Anggaran pendapatan tahun ${T} (untuk kolom Anggaran pada LRA). Anggaran belanja diambil otomatis dari RAB semua sumber dana.</p>
+     <div class="tbl-wrap"><table><thead><tr><th>Kode</th><th>Akun pendapatan</th><th>Anggaran (Rp)</th></tr></thead><tbody>${an.map(a => `<tr><td>${a.kode}</td><td>${esc(a.nama)}</td><td><input type="number" min="0" class="ang" data-a="${a.id}" value="${a.jumlah || ''}" style="width:170px"></td></tr>`).join('')}</tbody></table></div>
+     <div class="bar"><span style="flex:1"></span><button class="btn primary" id="angSimpan">Simpan anggaran</button></div>`;
+  } else if (tab === 'bagan') {
+    const ak = await api('/api/akun');
+    isi = `<div class="bar"><button class="btn primary" id="akBaru">+ Akun baru</button></div><div class="tbl-wrap"><table><thead><tr><th>Kode</th><th>Nama</th><th>Jenis</th><th>Normal</th><th>Keterangan</th><th></th></tr></thead><tbody>
+     ${ak.map(a => `<tr class="${a.aktif ? '' : 'batal'}"><td>${a.kode}</td><td>${esc(a.nama)}</td><td>${a.jenis}</td><td>${a.normal === 'D' ? 'Debit' : 'Kredit'}</td><td class="muted" style="font-size:.82em">${a.kas ? 'akun kas · ' : ''}${a.lra === 'BELANJA_MODAL' ? 'belanja modal · ' : a.lra === 'PEMBIAYAAN' ? 'pembiayaan · ' : ''}${a.arus.toLowerCase()}${a.dipakai ? ` · ${a.dipakai} baris jurnal` : ''}</td><td><button class="btn small" data-akt="${a.id}" data-on="${a.aktif}">${a.aktif ? 'Nonaktifkan' : 'Aktifkan'}</button></td></tr>`).join('')}</tbody></table></div>`;
+  } else if (tab === 'calk') {
+    const c = await api('/api/laporan/calk-teks?tahun=' + T);
+    isi = `<p class="muted">Teks Catatan atas Laporan Keuangan. Angka rincian pos disusun otomatis dari jurnal.</p>${c.map(x => `<label>${esc(x.judul)}<textarea class="calk" data-k="${x.kode}" rows="4">${esc(x.isi)}</textarea></label>`).join('')}<div class="bar"><span style="flex:1"></span><button class="btn primary" id="calkSimpan">Simpan CaLK</button></div>`;
+  }
+  m.innerHTML = `<h2>Akuntansi &amp; Laporan Keuangan</h2>
+   <p class="muted">Laporan keuangan BLU menurut PSAP 13 — <b>satu kesatuan</b> semua sumber dana (DAU, BOK, BLUD). Hanya Kepala dan Bendahara BLUD.</p>
+   <div class="bar"><label style="display:flex;gap:6px;align-items:center">Tahun <input id="akTh" type="number" value="${T}" style="width:90px"></label>
+    ${tab === 'laporan' ? `<select id="akBln">${BLN.map((b, i) => `<option value="${i + 1}" ${S.akBulan === i + 1 ? 'selected' : ''}>s.d. ${b}</option>`).join('')}</select><span style="flex:1"></span>${dlBtns('')}${dlBtns(S.akJenis)}` : ''}</div>
+   <div class="tabs">${[['laporan', 'Laporan'], ['jurnal', 'Jurnal'], ['saldo', 'Saldo awal'], ['anggaran', 'Anggaran pendapatan'], ['bagan', 'Bagan akun'], ['calk', 'Teks CaLK']].map(([k, l]) => `<button class="tab ${tab === k ? 'on' : ''}" data-tab="${k}">${l}</button>`).join('')}</div>${isi}`;
+  $('#akTh').onchange = e => { S.bokTahun = Number(e.target.value) || T; reload(); };
+  if ($('#akBln')) $('#akBln').onchange = e => { S.akBulan = Number(e.target.value); reload(); };
+  m.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { S.akTab = b.dataset.tab; reload(); });
+  m.querySelectorAll('[data-jenis]').forEach(b => b.onclick = () => { S.akJenis = b.dataset.jenis; reload(); });
+  m.querySelectorAll('[data-lap]').forEach(b => b.onclick = () => download(`/api/laporan/dok?tahun=${T}&bulan=${S.akBulan}${b.dataset.j ? '&jenis=' + b.dataset.j : ''}&format=${b.dataset.lap}`, `Laporan_Keuangan_${T}${b.dataset.j ? '_' + b.dataset.j : ''}.${b.dataset.lap}`));
+  const aksi = fn => async () => { try { await fn(); } catch (x) { toast(x.message, 1); } };
+  if ($('#akPend')) $('#akPend').onclick = async () => {
+    const ak = (await api('/api/akun')).filter(a => a.jenis === 'PENDAPATAN' && a.aktif);
+    dialog('Penerimaan pendapatan', `<label>Akun pendapatan<select name="akun_id">${ak.map(a => `<option value="${a.id}">${a.kode} ${esc(a.nama)}</option>`).join('')}</select></label>
+      <div class="grid2"><label>Sumber dana<select name="sumber"><option>BLUD</option><option>BOK</option><option>DAU</option></select></label><label>Tanggal<input name="tanggal" type="date" value="${new Date().toISOString().slice(0, 10)}" required></label></div>
+      <div class="grid2"><label>Jumlah (Rp)<input name="jumlah" type="number" min="1" required></label><label>No. bukti<input name="no_bukti"></label></div><label>Uraian<input name="uraian"></label>
+      <p class="muted" style="font-size:.85em">Dicatat sebagai: Debit Kas (sesuai sumber dana) / Kredit akun pendapatan.</p>`, async d => { await api('/api/akun/pendapatan', { method: 'POST', body: d }); toast('Pendapatan dicatat.'); await reload(); });
+  };
+  if ($('#akJur')) $('#akJur').onclick = async () => {
+    const ak = (await api('/api/akun')).filter(a => a.aktif), opt = ak.map(a => `<option value="${a.id}">${a.kode} ${esc(a.nama)}</option>`).join('');
+    const baris = i => `<div class="grid3" style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:6px;margin-top:4px"><select name="a${i}"><option value="">— akun —</option>${opt}</select><input name="d${i}" type="number" min="0" placeholder="Debit"><input name="k${i}" type="number" min="0" placeholder="Kredit"></div>`;
+    dialog('Jurnal manual', `<div class="grid2"><label>Tanggal<input name="tanggal" type="date" value="${new Date().toISOString().slice(0, 10)}" required></label><label>Basis<select name="basis"><option value="AKRUAL">Akrual (tidak ke LRA/LAK)</option><option value="KAS">Kas (masuk LRA &amp; LAK)</option></select></label></div>
+      <label>Uraian<input name="uraian" required></label>${[0, 1, 2, 3].map(baris).join('')}<p class="muted" style="font-size:.85em">Debit total harus sama dengan kredit total.</p>`,
+      async d => { const b = [0, 1, 2, 3].filter(i => d['a' + i]).map(i => ({ akun_id: Number(d['a' + i]), debit: Number(d['d' + i] || 0), kredit: Number(d['k' + i] || 0) })); await api('/api/akun/jurnal', { method: 'POST', body: { tanggal: d.tanggal, basis: d.basis, uraian: d.uraian, baris: b } }); toast('Jurnal tersimpan.'); await reload(); });
+  };
+  m.querySelectorAll('[data-hj]').forEach(b => b.onclick = () => dialog('Hapus jurnal?', '<p>Jurnal manual akan dihapus (tercatat di riwayat).</p>', async () => { await api('/api/akun/jurnal/' + b.dataset.hj, { method: 'DELETE' }); toast('Dihapus.'); await reload(); }, 'Hapus'));
+  if ($('#saldoSimpan')) {
+    const hitung = () => { let a = 0, p = 0; m.querySelectorAll('.saldo').forEach(i => { const v = Number(i.value || 0); if (i.dataset.j === 'ASET') a += i.dataset.n === 'D' ? v : -v; else p += v; }); $('#saldoCek').innerHTML = `Aset ${rp(a)} · Kewajiban+Ekuitas ${rp(p)} · ` + (a === p ? '<b class="okc">seimbang</b>' : `<b class="err">selisih ${rp(a - p)}</b>`); };
+    m.querySelectorAll('.saldo').forEach(i => i.oninput = hitung); hitung();
+    $('#saldoSimpan').onclick = aksi(async () => { await api('/api/akun/saldo-awal', { method: 'PUT', body: { tahun: T, saldo: [...m.querySelectorAll('.saldo')].map(i => ({ akun_id: Number(i.dataset.a), saldo: Number(i.value || 0) })) } }); toast('Saldo awal tersimpan.'); });
+  }
+  if ($('#angSimpan')) $('#angSimpan').onclick = aksi(async () => { await api('/api/akun/anggaran-pendapatan', { method: 'PUT', body: { tahun: T, anggaran: [...m.querySelectorAll('.ang')].map(i => ({ akun_id: Number(i.dataset.a), jumlah: Number(i.value || 0) })) } }); toast('Anggaran tersimpan.'); });
+  if ($('#calkSimpan')) $('#calkSimpan').onclick = aksi(async () => { const b = {}; m.querySelectorAll('.calk').forEach(t => { b[t.dataset.k] = t.value; }); await api('/api/laporan/calk', { method: 'PUT', body: { tahun: T, bagian: b } }); toast('CaLK tersimpan.'); });
+  if ($('#akBaru')) $('#akBaru').onclick = () => dialog('Akun baru', `<div class="grid2"><label>Kode<input name="kode" required placeholder="1.1.1.03"></label><label>Jenis<select name="jenis">${['ASET', 'KEWAJIBAN', 'EKUITAS', 'PENDAPATAN', 'BEBAN'].map(x => `<option>${x}</option>`).join('')}</select></label></div><label>Nama<input name="nama" required></label>
+    <div class="grid2"><label>Arus kas<select name="arus"><option value="OPERASI">Operasi</option><option value="INVESTASI">Investasi</option><option value="PENDANAAN">Pendanaan</option></select></label><label>Pemetaan LRA<select name="lra"><option value="">—</option><option value="BELANJA_MODAL">Belanja modal</option><option value="PEMBIAYAAN">Pembiayaan</option></select></label></div>
+    <label><input type="checkbox" name="kas"> Akun kas (khusus Aset)</label>`, async d => { await api('/api/akun', { method: 'POST', body: d }); toast('Akun ditambahkan.'); await reload(); });
+  m.querySelectorAll('[data-akt]').forEach(b => b.onclick = aksi(async () => { await api('/api/akun/' + b.dataset.akt, { method: 'PUT', body: { aktif: b.dataset.on === '1' ? 0 : 1 } }); await reload(); }));
+}
+
 // ---------- Realisasi & SPJ ----------
 S.spTab = 'spj'; S.spStatus = ''; S.spSumber = '';
 const SP_BADGE = { Draft: 'st-Draft', Diajukan: 'st-Diajukan', Dikembalikan: 'st-Ditolak', Diverifikasi: 'st-Terjadwal', Dibayar: 'st-Terlaksana' };
@@ -705,7 +831,7 @@ async function viewNomor(m) {
   const T = S.bokTahun, kepala = S.user.role === 'kepala';
   const [jenis, daftar] = await Promise.all([api('/api/nomor/jenis'), api(`/api/nomor?tahun=${T}` + (S.nmJenis ? `&jenis=${S.nmJenis}` : ''))]);
   const umum = jenis.filter(j => !j.kode.startsWith('ST-') && j.aktif);
-  m.innerHTML = `<h2>Penomoran Surat</h2>
+  m.innerHTML = `<h3>Nomor surat umum &amp; kode penomoran</h3>
    <p class="muted">Pola nomor mengikuti contoh Srikandi: <code>klasifikasi/yymm-urut/unit/bulan-romawi/tahun</code>. Klasifikasi arsip menurut Permendagri 83/2022 (<b>000.1.2.3</b> = Perjalanan Dinas Pegawai; <b>000</b> = Umum); tata naskah menurut Permendagri 1/2023.
    Seri nomor <b>terpisah</b> untuk BOK, DAU, BLUD, dan Surat Umum; nomor tidak pernah dipakai ulang. Nomor resmi Surat Tugas tetap diberikan Srikandi saat TTE.</p>
    <div class="bar"><label style="display:flex;gap:6px;align-items:center">Tahun <input id="nTh" type="number" value="${T}" style="width:90px"></label>
@@ -748,25 +874,39 @@ S.stTab = 'terbit';
 async function viewSurat(m) {
   const T = S.bokTahun, penuhRole = S.bisaBaca;
   const [siap, daftar] = await Promise.all([penuhRole ? api(`/api/st/siap?tahun=${T}`) : Promise.resolve([]), api(`/api/st?tahun=${T}`)]);
-  const tab = S.stTab === 'siap' && penuhRole ? 'siap' : 'terbit';
+  const tab = ['siap', 'nomor'].includes(S.stTab) && penuhRole ? S.stTab : 'terbit';
   const bdg = x => `<span class="badge ${x.status === 'Terbit' ? 'st-Disetujui' : 'st-Dibatalkan'}">${x.status}${x.versi > 1 ? ' v' + x.versi : ''}</span>`;
   const nm = n => n.split(',')[0];
-  m.innerHTML = `<h2>Surat Tugas &amp; SPD</h2>
+  m.innerHTML = `<h2>Surat</h2>
    <p class="muted">${penuhRole ? 'ST dan SPD dibuat dari jadwal yang sudah disetujui. Ekspor <b>DOCX Srikandi</b> memakai templat resmi (kode tanda tangan elektronik dibiarkan untuk diisi Srikandi). Setelah terbit, isi ST <b>terkunci</b>; perubahan hanya lewat pembatalan + terbit ulang.' : 'Surat Tugas dan SPD Anda.'}</p>
-   <div class="bar"><label style="display:flex;gap:6px;align-items:center">Tahun <input id="sTh" type="number" value="${T}" style="width:90px"></label></div>
-   ${penuhRole ? `<div class="tabs"><button class="tab ${tab === 'terbit' ? 'on' : ''}" data-tab="terbit">ST terbit (${daftar.length})</button><button class="tab ${tab === 'siap' ? 'on' : ''}" data-tab="siap">Siap diterbitkan (${siap.length})</button></div>` : ''}
-   ${tab === 'siap' ? (siap.length ? `<div class="tbl-wrap"><table><thead><tr><th>Tanggal</th><th>Kegiatan</th><th>Lokasi</th><th>Petugas</th><th>Dana</th><th></th></tr></thead><tbody>
-      ${siap.map(j => `<tr><td style="white-space:nowrap">${tglID(j.mulai)}${j.selesai !== j.mulai ? '<br>s.d. ' + tglID(j.selesai) : ''}</td><td>${esc(j.kegiatan)}</td><td>${esc(j.lokasi)}</td><td>${j.petugas.map(x => esc(nm(x))).join(', ')}</td><td>${esc(j.dana)}</td>
+   ${tab === 'nomor' ? '' : `<div class="bar"><label style="display:flex;gap:6px;align-items:center">Tahun <input id="sTh" type="number" value="${T}" style="width:90px"></label></div>`}
+   ${penuhRole ? `<div class="tabs"><button class="tab ${tab === 'terbit' ? 'on' : ''}" data-tab="terbit">Surat Tugas &amp; SPD (${daftar.length})</button><button class="tab ${tab === 'siap' ? 'on' : ''}" data-tab="siap">Siap diterbitkan (${siap.length})</button><button class="tab ${tab === 'nomor' ? 'on' : ''}" data-tab="nomor">Nomor surat umum &amp; kode</button></div>` : ''}
+   ${tab === 'nomor' ? '<div id="nomorBox"></div>' : tab === 'siap' ? (siap.length ? `<div class="bar"><span class="muted">${S.kepalaWajib ? 'Hanya jadwal yang sudah disetujui Kepala.' : 'Persetujuan Kepala opsional: Anda mengotorisasi sendiri saat menerbitkan.'}</span><span style="flex:1"></span><button class="btn primary" id="terbitMassal">Terbitkan yang dipilih</button></div><div class="tbl-wrap"><table><thead><tr><th><input type="checkbox" id="siapSemua" title="Pilih semua"></th><th>Tanggal</th><th>Kegiatan</th><th>Lokasi</th><th>Petugas</th><th>Dana</th><th></th></tr></thead><tbody>
+      ${siap.map(j => `<tr><td><input type="checkbox" class="siapPilih" value="${j.id}"></td><td style="white-space:nowrap">${tglID(j.mulai)}${j.selesai !== j.mulai ? '<br>s.d. ' + tglID(j.selesai) : ''}</td><td>${esc(j.kegiatan)}</td><td>${esc(j.lokasi)}</td><td>${j.petugas.map(x => esc(nm(x))).join(', ')}</td><td>${esc(j.dana)}</td>
        <td><button class="btn small primary" data-terbit="${j.id}">Terbitkan ST</button></td></tr>`).join('')}</tbody></table></div>`
       : '<div class="card"><p>Tidak ada jadwal Disetujui yang menunggu Surat Tugas.</p><p class="muted">Jadwal harus berstatus <b>Disetujui</b> (oleh Kepala) dan Anda harus berwenang atas sumber dananya. Pengelola Program tidak menerbitkan ST.</p></div>')
-    : `<div class="tbl-wrap"><table><thead><tr><th>Nomor</th><th>Tanggal</th><th>Kegiatan / tujuan</th><th>Petugas</th><th>Status</th><th></th></tr></thead><tbody>
+    : `<div class="tbl-wrap"><table><thead><tr><th>Nomor</th><th>Tanggal</th><th>Kegiatan / tujuan</th><th>Petugas</th><th>Realisasi belanja</th><th>Status</th><th></th></tr></thead><tbody>
       ${daftar.map(x => `<tr class="${x.status === 'Dibatalkan' ? 'batal' : ''}"><td style="white-space:nowrap"><b>${esc(x.nomor)}</b><br>${x.nomor_srikandi ? `<span class="okc">Srikandi: ${esc(x.nomor_srikandi)}</span>` : '<span class="muted">belum ada nomor Srikandi</span>'}</td>
         <td style="white-space:nowrap">${tglID(x.mulai)}${x.selesai !== x.mulai ? '<br>s.d. ' + tglID(x.selesai) : ''}</td><td>${esc(x.maksud)}<br><span class="muted">${esc(x.lokasi)} · ${esc(x.dana)}</span></td>
-        <td>${x.spd.length} orang</td><td>${bdg(x)}${x.alasan_batal ? `<br><span class="err" style="font-size:.8em">${esc(x.alasan_batal)}</span>` : ''}</td><td><button class="btn small" data-buka="${x.id}">Dokumen</button></td></tr>`).join('') || '<tr><td colspan="6" class="muted">Belum ada Surat Tugas.</td></tr>'}</tbody></table></div>`}`;
+        <td>${x.spd.length} orang</td><td style="white-space:nowrap">${x.status === 'Dibatalkan' ? '-' : x.penuh ? `${rp(x.realisasi.dibayar)}<br><span class="muted">${x.realisasi.lunas}/${x.realisasi.petugas} SPJ dibayar</span>` : x.spd.map(p => `<span class="badge ${SP_BADGE[p.spj_status] || ''}">${p.spj_status || '-'}</span>`).join(' ')}</td><td>${bdg(x)}${x.alasan_batal ? `<br><span class="err" style="font-size:.8em">${esc(x.alasan_batal)}</span>` : ''}</td><td><button class="btn small" data-buka="${x.id}">Dokumen</button></td></tr>`).join('') || '<tr><td colspan="7" class="muted">Belum ada Surat Tugas.</td></tr>'}</tbody></table></div>`}`;
   const reload = () => viewSurat(m);
+  if (tab === 'nomor') { m.querySelectorAll('[data-tab]').forEach(t => t.onclick = () => { S.stTab = t.dataset.tab; reload(); }); return viewNomor($('#nomorBox')); }
   $('#sTh').onchange = e => { S.bokTahun = Number(e.target.value) || T; reload(); };
   m.querySelectorAll('[data-tab]').forEach(t => t.onclick = () => { S.stTab = t.dataset.tab; reload(); });
 
+  if ($('#siapSemua')) {
+    $('#siapSemua').onchange = e => m.querySelectorAll('.siapPilih').forEach(c => { c.checked = e.target.checked; });
+    $('#terbitMassal').onclick = async () => {
+      const ids = [...m.querySelectorAll('.siapPilih:checked')].map(c => Number(c.value));
+      if (!ids.length) return toast('Centang jadwal yang akan diterbitkan.', 1);
+      if (!confirm(`Terbitkan ${ids.length} Surat Tugas dengan isian bawaan (dasar, maksud, DPA, penandatangan utama)? Hanya yang berstatus siap akan diproses.`)) return;
+      try {
+        const r = await api('/api/st/terbit-massal', { method: 'POST', body: { jadwal_ids: ids } });
+        toast(`${r.berhasil} ST terbit${r.gagal ? `, ${r.gagal} gagal: ` + r.hasil.filter(x => !x.ok).map(x => x.error).join('; ') : ''}`, r.gagal ? 1 : 0);
+        S.stTab = 'terbit'; await reload();
+      } catch (x) { toast(x.message, 1); }
+    };
+  }
   async function terbit(jid) {
     const dr = await api('/api/st/draft/' + jid);
     dialog('Terbitkan Surat Tugas', `
@@ -787,6 +927,7 @@ async function viewSurat(m) {
     dialog(`ST ${x.nomor}`, `<div class="kvl"><b>Status</b><span>${bdg(x)}</span><b>Nomor Srikandi</b><span>${x.nomor_srikandi ? esc(x.nomor_srikandi) : '<span class="muted">belum dicatat</span>'}</span>
       <b>Kegiatan</b><span>${esc(x.maksud)}</span><b>Tempat/Waktu</b><span>${esc(x.lokasi)}, ${tglID(x.mulai)}${x.selesai !== x.mulai ? ' s.d. ' + tglID(x.selesai) : ''}</span>
       <b>Petugas</b><span>${x.spd.map(p => `${esc(nm(p.nama))}${x.penuh ? ` <span class="muted">(${rp(p.total)})</span>` : ''}`).join('<br>')}</span>
+      ${aktif ? `<b>Realisasi belanja</b><span>${x.spd.map(p => `${esc(nm(p.nama))}: <span class="badge ${SP_BADGE[p.spj_status] || ''}">${p.spj_status || 'belum ada SPJ'}</span>${p.spj_total != null && x.penuh ? ' ' + rp(p.spj_total) : ''}${p.spj_bukti ? ` <span class="muted">${esc(p.spj_bukti)}</span>` : ''} ${p.spj_id ? `<button type="button" class="btn small" data-spj="${p.spj_id}">Buka SPJ</button>` : ''}`).join('<br>')}</span>` : ''}
       <b>Diterbitkan</b><span>${esc(x.dibuat_oleh)} · ${esc(x.dibuat_pada)}</span>${x.alasan_batal ? `<b>Dibatalkan</b><span class="err">${esc(x.alasan_batal)} (${esc(x.dibatalkan_oleh)})</span>` : ''}</div>
       ${x.penuh ? `<h4 style="margin:12px 0 4px">Ekspor ke Srikandi</h4><div class="acts">${aktif ? L('srikandi', '⬇ DOCX Srikandi (ST + SPD)', 'primary') : '<span class="muted">ST dibatalkan — tidak dapat diekspor.</span>'}</div>
         <p class="muted" style="font-size:.82em;margin:4px 0">Unggah berkas ini ke Srikandi; kode <code>\${nomor_naskah}</code>, <code>\${ttd_pengirim1/2}</code>, dst. diisi Srikandi saat TTE.</p>` : ''}
@@ -794,7 +935,8 @@ async function viewSurat(m) {
       ${x.penuh ? `<div class="acts" style="margin-top:6px">${L('kuitansi', 'Kuitansi')}${L('hadir', 'Daftar hadir')}${L('riil', 'Pengeluaran riil')}${L('batal', 'Pernyataan pembatalan')}${L('kembali', 'Pernyataan pengembalian biaya')}${L('lengkap', 'Semua dokumen')}</div>` : ''}
       ${x.penuh && aktif ? `<div class="acts" style="margin-top:14px;border-top:1px solid var(--line);padding-top:10px">${x.nomor_srikandi ? '' : '<button type="button" class="btn small" data-aksi="nomor">Catat nomor Srikandi</button>'}${x.bisa_batal ? '<button type="button" class="btn small danger" data-aksi="batal">Batalkan ST</button>' : ''}</div>` : ''}`);
     $('#dlgForm').onclick = e => {
-      const b = e.target.closest('[data-d],[data-aksi]'); if (!b) return;
+      const b = e.target.closest('[data-d],[data-aksi],[data-spj]'); if (!b) return;
+      if (b.dataset.spj) { $('#dlg').close(); bukaSpj(Number(b.dataset.spj), reload).catch(er => toast(er.message, 1)); return; }
       if (b.dataset.d === 'srikandi') { download(docUrl(id, 'srikandi'), `ST_SPD_Srikandi_${x.nomor_urut}.docx`); return; }
       if (b.dataset.d && b.dataset.f === 'docx') { download(docUrl(id, b.dataset.d) + '&format=docx', `${b.dataset.d.toUpperCase()}_${x.nomor_urut}.docx`); return; }
       if (b.dataset.d) { window.open(docUrl(id, b.dataset.d), '_blank'); return; }
@@ -865,7 +1007,7 @@ function viewData(m) {
 async function start() {
   try {
     const m = await api('/api/meta');
-    S.meta = m.meta; S.user = m.user; S.bisaTulis = m.bisaTulis; S.bisaBaca = m.bisaBaca; S.akses = m.akses;
+    S.meta = m.meta; S.user = m.user; S.bisaTulis = m.bisaTulis; S.bisaBaca = m.bisaBaca; S.akses = m.akses; S.kepalaWajib = m.kepalaWajib; S.akuntansi = m.akuntansi;
   } catch { return showLogin(); }
   $('#login').hidden = true; $('#app').hidden = false;
   $('#who').textContent = `${S.user.nama} · ${ROLE[S.user.role]}`;

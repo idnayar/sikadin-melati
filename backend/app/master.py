@@ -11,7 +11,7 @@ from openpyxl import Workbook, load_workbook
 from starlette.background import BackgroundTask
 
 from . import core
-from .core import Gagal, akses_sumber, audit, auth, bisa_baca, bisa_tulis, get_db, pesan_db
+from .core import Gagal, akses_sumber, audit, auth, bisa_baca, bisa_tulis, get_db, kepala_wajib, pesan_db
 from .db import DB_PATH, hash_password, hitung_tingkat, verify_password
 
 router = APIRouter(prefix="/api")
@@ -238,7 +238,7 @@ def _insert(db, tabel, d):
 
 
 @router.get("/meta")
-def meta(user=Depends(auth)):
+def meta(user=Depends(auth), db=Depends(get_db)):
     m = {}
     for k, r in RES.items():
         if r.get("onlyKepala") and user["role"] != "kepala":
@@ -246,7 +246,8 @@ def meta(user=Depends(auth)):
         m[k] = {"judul": r["judul"], "fields": r["fields"], "list": r["list"], "tahunFilter": r.get("tahunFilter"),
                 "noCreate": r.get("noCreate"), "noDelete": r.get("noDelete")}
     akses = {k: {a: akses_sumber(user, k, a) for a in ("baca", "pagu", "rencana")} for k in ("BOK", "DAU", "BLUD")}
-    return {"user": user, "meta": m, "bisaTulis": bisa_tulis(user), "bisaBaca": bisa_baca(user), "akses": akses}
+    return {"user": user, "meta": m, "bisaTulis": bisa_tulis(user), "bisaBaca": bisa_baca(user), "akses": akses,
+            "kepalaWajib": kepala_wajib(db), "akuntansi": user["role"] in ("kepala", "bendahara_blud")}
 
 
 @router.get("/data/{res}")

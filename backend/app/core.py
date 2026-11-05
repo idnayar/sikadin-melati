@@ -80,6 +80,11 @@ def kode_sd(db, sd_id) -> str:
     return r["kode"] if r else ""
 
 
+def kepala_wajib(db) -> bool:
+    r = db.execute("SELECT nilai FROM pengaturan WHERE kunci='kepala_wajib'").fetchone()
+    return bool(r) and str(r["nilai"]).strip() == "1"
+
+
 def bisa_tulis(u: dict) -> bool:
     return u["role"] in ("kepala", "bendahara")
 
