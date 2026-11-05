@@ -1,1 +1,0 @@
-{"name":"sikadin","version":"0.1.0","private":true,"type":"commonjs","scripts":{"start":"node server/index.js"},"engines":{"node":">=22.5"},"dependencies":{"express":"^4.22.3","xlsx":"^0.18.5"}}
