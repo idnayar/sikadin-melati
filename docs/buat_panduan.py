@@ -168,10 +168,28 @@ def bagian(no, judul, lead=None):
 def halaman(c, d):
     c.saveState()
     c.setFillColor(G6); c.rect(0, H - 0.55 * cm, W, 0.55 * cm, stroke=0, fill=1)
-    c.setFont(FS, 8); c.setFillColor(MUTED); c.drawString(LM, 1.15 * cm, "SIKADIN · Panduan Penggunaan · UPT Puskesmas Melati")
+    c.setFont(FS, 8); c.setFillColor(MUTED); c.drawString(LM, 1.15 * cm, "SIKADIN · " + COVER["judul"] + " · UPT Puskesmas Melati")
     c.setFillColor(INK); c.setFont(FB, 8.5); c.drawRightString(W - LM, 1.15 * cm, str(d.page))
     c.setStrokeColor(LINE); c.setLineWidth(0.5); c.line(LM, 1.55 * cm, W - LM, 1.55 * cm)
     c.restoreState()
+
+
+ASET = Path(__file__).resolve().parent / "aset"
+COVER = {"judul": "Panduan Penggunaan untuk semua pihak", "baris": ["Kepala Puskesmas · Bendahara · Bendahara BLUD", "Pengelola Program · Pembuat Surat Tugas · Pegawai"]}
+
+
+def logo_bar(c):
+    """Dua logo (Kabupaten Kapuas & UPT Puskesmas Melati) pada kartu putih di atas sampul."""
+    y, h = H - 6.2 * cm, 3.6 * cm
+    c.setFillColor(white); c.roundRect(LM, y, 9.4 * cm, h, 0.5 * cm, stroke=0, fill=1)
+    c.drawImage(str(ASET / "lambang-kapuas.png"), LM + 0.55 * cm, y + 0.3 * cm, width=2.7 * cm * 287 / 327, height=3.0 * cm, mask="auto")
+    c.drawImage(str(ASET / "logo-puskesmas.png"), LM + 3.35 * cm, y + 0.3 * cm, width=3.0 * cm, height=3.0 * cm, mask="auto")
+    c.setFillColor(G9); c.setFont(FB, 7.6)
+    c.drawString(LM + 6.5 * cm, y + 2.2 * cm, "PEMERINTAH")
+    c.drawString(LM + 6.5 * cm, y + 1.75 * cm, "KAB. KAPUAS")
+    c.setFillColor(G7); c.setFont(FS, 7.2)
+    c.drawString(LM + 6.5 * cm, y + 1.2 * cm, "UPT PUSKESMAS")
+    c.drawString(LM + 6.5 * cm, y + 0.8 * cm, "MELATI")
 
 
 def sampul(c, d):
@@ -179,13 +197,14 @@ def sampul(c, d):
     c.setFillColor(G9); c.rect(0, 0, W, H, stroke=0, fill=1)
     c.setFillColor(G7); c.circle(W - 2 * cm, H - 3 * cm, 7 * cm, stroke=0, fill=1)
     c.setFillColor(G6); c.circle(W - 1 * cm, H - 1 * cm, 3.4 * cm, stroke=0, fill=1)
+    logo_bar(c)
     c.setFillColor(G5); c.rect(LM, 9.8 * cm, 2.2 * cm, 0.28 * cm, stroke=0, fill=1)
     c.setFillColor(white); c.setFont(FB, 54); c.drawString(LM, 12.6 * cm, "SIKADIN")
     c.setFont(FL, 20); c.drawString(LM, 11.4 * cm, "Sistem Informasi Keuangan")
     c.drawString(LM, 10.6 * cm, "& Dinas Luar")
-    c.setFont(FS, 13); c.setFillColor(MINT); c.drawString(LM, 8.6 * cm, "Panduan Penggunaan untuk semua pihak")
+    c.setFont(FS, COVER.get("fs", 13) + (6 if COVER.get("besar") else 0)); c.setFillColor(MINT); c.drawString(LM, 8.6 * cm, COVER["judul"])
     c.setFont(F, 10.5); c.setFillColor(HexColor("#BBF7D0"))
-    for i, t in enumerate(["Kepala Puskesmas · Bendahara · Bendahara BLUD", "Pengelola Program · Pegawai"]):
+    for i, t in enumerate(COVER["baris"]):
         c.drawString(LM, 7.7 * cm - i * 0.55 * cm, t)
     c.setFillColor(G7); c.rect(0, 0, W, 3.2 * cm, stroke=0, fill=1)
     c.setFillColor(white); c.setFont(FB, 11); c.drawString(LM, 1.9 * cm, "UPT Puskesmas Melati")
@@ -370,16 +389,16 @@ def isi():
     return s
 
 
-def main():
-    doc = BaseDocTemplate(str(OUT), pagesize=A4, leftMargin=LM, rightMargin=LM, topMargin=1.5 * cm, bottomMargin=2.0 * cm, title="Panduan Penggunaan SIKADIN", author="UPT Puskesmas Melati",
+def main(out=None, story_fn=None, judul="Panduan Penggunaan SIKADIN"):
+    doc = BaseDocTemplate(str(out or OUT), pagesize=A4, leftMargin=LM, rightMargin=LM, topMargin=1.5 * cm, bottomMargin=2.0 * cm, title=judul, author="UPT Puskesmas Melati",
                           subject="Tutorial SIKADIN — Sistem Informasi Keuangan & Dinas Luar")
     kover = Frame(LM, 2 * cm, CW, H - 4 * cm, id="k")
     isi_f = Frame(LM, 2.0 * cm, CW, H - 3.9 * cm, id="i", leftPadding=0, rightPadding=0)
     doc.addPageTemplates([PageTemplate(id="cover", frames=[kover], onPage=sampul, autoNextPageTemplate="isi"), PageTemplate(id="isi", frames=[isi_f], onPage=halaman)])
     from reportlab.platypus import NextPageTemplate
-    story = [NextPageTemplate("isi"), PageBreak()] + isi()
+    story = [NextPageTemplate("isi"), PageBreak()] + (story_fn or isi)()
     doc.build(story)
-    print("OK:", OUT, OUT.stat().st_size // 1024, "KB")
+    print("OK:", out or OUT, (out or OUT).stat().st_size // 1024, "KB")
 
 
 if __name__ == "__main__":
