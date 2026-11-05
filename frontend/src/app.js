@@ -679,7 +679,7 @@ async function viewSurat(m) {
   const docUrl = (id, dok, mode) => `/api/st/${id}/dok?dok=${dok}${mode ? '&mode=' + mode : ''}`;
   function buka(id) {
     const x = daftar.find(r => r.id === id), aktif = x.status === 'Terbit';
-    const L = (dok, label, cls = '') => `<button type="button" class="btn small ${cls}" data-d="${dok}">${label}</button>`;
+    const L = (dok, label, cls = '') => `<span class="fmt"><b>${label}</b> <button type="button" class="btn small" data-d="${dok}">PDF</button>${x.penuh || !['st', 'spd', 'paket'].includes(dok) ? ` <button type="button" class="btn small" data-d="${dok}" data-f="docx">DOCX</button>` : ''}</span> `;
     dialog(`ST ${x.nomor}`, `<div class="kvl"><b>Status</b><span>${bdg(x)}</span><b>Nomor Srikandi</b><span>${x.nomor_srikandi ? esc(x.nomor_srikandi) : '<span class="muted">belum dicatat</span>'}</span>
       <b>Kegiatan</b><span>${esc(x.maksud)}</span><b>Tempat/Waktu</b><span>${esc(x.lokasi)}, ${tglID(x.mulai)}${x.selesai !== x.mulai ? ' s.d. ' + tglID(x.selesai) : ''}</span>
       <b>Petugas</b><span>${x.spd.map(p => `${esc(nm(p.nama))}${x.penuh ? ` <span class="muted">(${rp(p.total)})</span>` : ''}`).join('<br>')}</span>
@@ -692,6 +692,7 @@ async function viewSurat(m) {
     $('#dlgForm').onclick = e => {
       const b = e.target.closest('[data-d],[data-aksi]'); if (!b) return;
       if (b.dataset.d === 'srikandi') { download(docUrl(id, 'srikandi'), `ST_SPD_Srikandi_${x.nomor_urut}.docx`); return; }
+      if (b.dataset.d && b.dataset.f === 'docx') { download(docUrl(id, b.dataset.d) + '&format=docx', `${b.dataset.d.toUpperCase()}_${x.nomor_urut}.docx`); return; }
       if (b.dataset.d) { window.open(docUrl(id, b.dataset.d), '_blank'); return; }
       $('#dlg').close();
       if (b.dataset.aksi === 'nomor') dialog('Catat nomor Srikandi', `<p class="muted">Salin nomor naskah dari Srikandi setelah ST ditandatangani. Hanya dapat diisi sekali.</p><label>Nomor naskah<input name="nomor" placeholder="000.1.2.3/2611-1179/PKM.MELATI/XI/2026" required></label>`, async d => { await api(`/api/st/${id}/nomor-srikandi`, { method: 'PUT', body: d }); toast('Nomor Srikandi tersimpan.'); await reload(); });

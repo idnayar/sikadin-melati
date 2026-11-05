@@ -226,8 +226,25 @@ DOK_PETUGAS = {"st", "spd", "rincian", "paket"}
 DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 
+def _pdf_ke_docx(pdf: bytes) -> bytes:
+    import os
+    import tempfile
+    from pdf2docx import Converter
+    with tempfile.TemporaryDirectory() as d:
+        p, o = os.path.join(d, "a.pdf"), os.path.join(d, "a.docx")
+        with open(p, "wb") as f:
+            f.write(pdf)
+        c = Converter(p)
+        try:
+            c.convert(o)
+        finally:
+            c.close()
+        with open(o, "rb") as f:
+            return f.read()
+
+
 @router.get("/{sid}/dok")
-def dokumen(sid: int, dok: str = "st", pegawai_id: int | None = None, mode: str = "cetak", user=Depends(auth), db=Depends(get_db)):
+def dokumen(sid: int, dok: str = "st", pegawai_id: int | None = None, mode: str = "cetak", format: str = "pdf", user=Depends(auth), db=Depends(get_db)):
     """dok=srikandi -> berkas .docx (templat resmi Srikandi, kode TTE dibiarkan) untuk diunggah ke Srikandi.
     Lainnya -> PDF. mode='cetak' (nama tercetak) atau 'srikandi' (memuat kode ${...}) untuk ST/SPD PDF."""
     s = db.execute("SELECT * FROM surat_tugas WHERE id=?", (sid,)).fetchone()
@@ -241,6 +258,10 @@ def dokumen(sid: int, dok: str = "st", pegawai_id: int | None = None, mode: str 
     isi = json.loads(s["isi_json"])
     stx = {"nomor": s["nomor"], "nomor_tampil": s["nomor_srikandi"] or s["nomor"], "nomor_srikandi": s["nomor_srikandi"], "tanggal_surat": s["tanggal_surat"], "dasar": s["dasar"], "maksud": s["maksud"]}
     nama_berkas = f"{s['nomor_urut']:03d}_{s['tanggal_surat']}"
+    if format == "docx" and dok in ("st", "spd", "paket"):
+        if not penuh:
+            raise Gagal("DOCX ST/SPD hanya untuk Kepala dan pengelola keuangan.", 403)
+        dok = "srikandi"   # ST/SPD DOCX = templat resmi Srikandi (ST + SPD dalam satu berkas)
     if dok == "srikandi":
         if s["status"] != "Terbit":
             raise Gagal("Surat Tugas yang dibatalkan tidak dapat diekspor ke Srikandi.")
@@ -282,4 +303,7 @@ def dokumen(sid: int, dok: str = "st", pegawai_id: int | None = None, mode: str 
         tanda = Paragraph(f'<font color="#b91c1c"><b>*** DIBATALKAN — {dk.esc(s["alasan_batal"])} ***</b></font>', GAYA["c"])
         parts = [[tanda, *p] for p in parts]
     pdf = dk.build_pdf(dk.gabung(*parts), f"{dok.upper()} {stx['nomor_tampil']}", footer_srikandi=(mode == "srikandi" and dok in ("st", "spd")))
+    if format == "docx":   # dokumen non-templat: PDF dikonversi ke DOCX yang dapat disunting
+        data = _pdf_ke_docx(pdf)
+        return Response(data, media_type=DOCX, headers={"Content-Disposition": f'attachment; filename="{dok.upper()}_{nama_berkas}.docx"', "Cache-Control": "no-store"})
     return Response(pdf, media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="{dok.upper()}_{nama_berkas}.pdf"', "Cache-Control": "no-store"})
