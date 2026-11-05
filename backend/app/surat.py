@@ -4,7 +4,7 @@ import json
 import re
 import sqlite3
 
-from fastapi import APIRouter, Body, Depends
+from fastapi import APIRouter, Body, Depends, Request
 from fastapi.responses import Response
 
 from . import dokumen as dk
@@ -198,7 +198,7 @@ def daftar(tahun: int, status: str | None = None, user=Depends(auth), db=Depends
         q.append("s.status=?")
         a.append(status)
     rows = db.execute(f"""SELECT s.id, s.jadwal_id, s.sumber_dana_id, s.tahun, s.nomor, s.nomor_urut, s.tanggal_surat, s.maksud, s.status, s.versi, s.pengganti_dari, s.alasan_batal,
-        s.nomor_srikandi, s.jenis_nomor, s.dibuat_oleh, s.dibuat_pada, s.dibatalkan_oleh, s.dibatalkan_pada, sd.kode dana, j.mulai, j.selesai, l.nama lokasi
+        s.nomor_srikandi, s.srikandi_diunggah_pada, s.srikandi_diunggah_oleh, EXISTS(SELECT 1 FROM st_final f WHERE f.st_id=s.id) ada_final, s.jenis_nomor, s.dibuat_oleh, s.dibuat_pada, s.dibatalkan_oleh, s.dibatalkan_pada, sd.kode dana, j.mulai, j.selesai, l.nama lokasi
         FROM surat_tugas s JOIN jadwal j ON j.id=s.jadwal_id JOIN lokasi l ON l.id=j.lokasi_id JOIN sumber_dana sd ON sd.id=s.sumber_dana_id WHERE {' AND '.join(q)} ORDER BY s.nomor_urut DESC""", a).fetchall()
     out = []
     for s in rows:
@@ -210,6 +210,8 @@ def daftar(tahun: int, status: str | None = None, user=Depends(auth), db=Depends
         if not penuh:   # petugas biasa: hanya SPD miliknya, tanpa biaya orang lain
             sp = [x for x in sp if x["pegawai_id"] == user.get("pegawai_id")]
         s["spd"] = sp
+        s["srikandi"] = {"diunggah": bool(s["srikandi_diunggah_pada"]), "nomor": bool(s["nomor_srikandi"]), "final": bool(s["ada_final"])}
+        s["srikandi"]["selesai"] = s["srikandi"]["nomor"] and s["srikandi"]["final"]
         s["realisasi"] = {"dibayar": sum(x["spj_total"] or 0 for x in sp if x["spj_status"] == "Dibayar"), "rencana": sum(x["total"] for x in sp),
                           "lunas": sum(1 for x in sp if x["spj_status"] == "Dibayar"), "petugas": len(sp)}
         s["penuh"] = penuh
@@ -256,6 +258,86 @@ def nomor_srikandi(sid: int, body: dict = Body(default={}), user=Depends(perlu_b
     db.execute("UPDATE jadwal SET no_st=? WHERE id=?", (n, s["jadwal_id"]))
     audit(db, user, "surat_tugas", sid, "NOMOR-SRIKANDI", {"nomor_internal": s["nomor"]}, {"nomor_srikandi": n}, kode)
     return {"ok": 1}
+
+
+@router.post("/{sid}/tandai-srikandi")
+def tandai_srikandi(sid: int, user=Depends(perlu_baca), db=Depends(get_db)):
+    """Menandai bahwa berkas DOCX sudah diunggah ke Srikandi (menunggu tanda tangan elektronik)."""
+    s = db.execute("SELECT * FROM surat_tugas WHERE id=?", (sid,)).fetchone()
+    if not s:
+        raise Gagal("Surat Tugas tidak ditemukan.", 404)
+    kode = kode_sd(db, s["sumber_dana_id"])
+    cek_sumber(user, kode, "rencana")
+    if s["status"] != "Terbit":
+        raise Gagal("Surat Tugas sudah dibatalkan.")
+    if s["srikandi_diunggah_pada"]:
+        raise Gagal("Sudah ditandai diunggah ke Srikandi.")
+    db.execute("UPDATE surat_tugas SET srikandi_diunggah_pada=datetime('now','localtime'), srikandi_diunggah_oleh=? WHERE id=?", (user["username"], sid))
+    audit(db, user, "surat_tugas", sid, "UNGGAH-SRIKANDI", None, {"nomor": s["nomor"]}, kode)
+    return {"ok": 1}
+
+
+_POLA_NOMOR = re.compile(r"\d{3}(?:\.\d+)*/\d{3,5}-\d+/[A-Za-z0-9.\-]+/[IVX]+/\d{4}")
+
+
+def _nomor_dari_pdf(data: bytes):
+    """Saran nomor naskah dari teks PDF hasil Srikandi (hanya saran; pengguna yang mengonfirmasi)."""
+    try:
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            import fitz
+        doc = fitz.open(stream=data, filetype="pdf")
+        for hal in doc:
+            m = _POLA_NOMOR.search(hal.get_text())
+            if m:
+                return m.group(0)
+    except Exception:  # noqa: BLE001
+        return None
+    return None
+
+
+@router.post("/{sid}/final")
+async def unggah_final(sid: int, request: Request, nama: str = "ST-final", user=Depends(perlu_baca), db=Depends(get_db)):
+    """Unggah PDF hasil Srikandi (sudah bertanda tangan elektronik). Menggantikan berkas sebelumnya bila ada."""
+    s = db.execute("SELECT * FROM surat_tugas WHERE id=?", (sid,)).fetchone()
+    if not s:
+        raise Gagal("Surat Tugas tidak ditemukan.", 404)
+    kode = kode_sd(db, s["sumber_dana_id"])
+    cek_sumber(user, kode, "rencana")
+    if s["status"] != "Terbit":
+        raise Gagal("Surat Tugas sudah dibatalkan.")
+    data = await request.body()
+    if not data.startswith(b"%PDF-"):
+        raise Gagal("Berkas harus PDF hasil Srikandi.")
+    if len(data) > 10 * 1024 * 1024:
+        raise Gagal("Berkas terlalu besar (maks. 10 MB).")
+    nomor = _nomor_dari_pdf(data)
+    bersih = re.sub(r"\.{2,}", ".", "".join(ch for ch in nama if ch.isalnum() or ch in " ._-"))[:60].lstrip(". ").strip() or "ST-final"
+    if not bersih.lower().endswith(".pdf"):
+        bersih += ".pdf"
+    ada = db.execute("SELECT id FROM st_final WHERE st_id=?", (sid,)).fetchone()
+    if ada:
+        db.execute("DELETE FROM st_final WHERE st_id=?", (sid,))
+    db.execute("INSERT INTO st_final(st_id,nama,ukuran,data,nomor_terdeteksi,diunggah_oleh) VALUES(?,?,?,?,?,?)", (sid, bersih, len(data), data, nomor, user["username"]))
+    if not s["srikandi_diunggah_pada"]:
+        db.execute("UPDATE surat_tugas SET srikandi_diunggah_pada=datetime('now','localtime'), srikandi_diunggah_oleh=? WHERE id=?", (user["username"], sid))
+    audit(db, user, "surat_tugas", sid, "UNGGAH-FINAL" + ("-GANTI" if ada else ""), None, {"nama": bersih, "ukuran": len(data), "nomor_terdeteksi": nomor}, kode)
+    return {"ok": 1, "nomor_terdeteksi": nomor, "nomor_tercatat": s["nomor_srikandi"], "diganti": bool(ada)}
+
+
+@router.get("/{sid}/final")
+def lihat_final(sid: int, user=Depends(auth), db=Depends(get_db)):
+    s = db.execute("SELECT * FROM surat_tugas WHERE id=?", (sid,)).fetchone()
+    if not s:
+        raise Gagal("Surat Tugas tidak ditemukan.", 404)
+    boleh, _ = _boleh_lihat(db, user, s)
+    if not boleh:
+        raise Gagal("Anda tidak berhak atas dokumen ini.", 403)
+    f = db.execute("SELECT nama, data FROM st_final WHERE st_id=?", (sid,)).fetchone()
+    if not f:
+        raise Gagal("Belum ada PDF hasil Srikandi untuk Surat Tugas ini.", 404)
+    return Response(f["data"], media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="{f["nama"]}"', "Cache-Control": "private, no-store"})
 
 
 DOK_PENUH = {"st", "spd", "rincian", "riil", "batal", "kembali", "hadir", "kuitansi", "paket", "lengkap", "srikandi"}

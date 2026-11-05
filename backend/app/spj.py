@@ -5,8 +5,9 @@ SPJ jenis UMUM untuk belanja lain pada baris RAB. Total dibayar per baris tidak 
 import datetime as dt
 import io
 import json
+import re
 
-from fastapi import APIRouter, Body, Depends
+from fastapi import APIRouter, Body, Depends, Request
 from fastapi.responses import Response
 
 from . import akuntansi, sinkron
@@ -283,12 +284,80 @@ def rekap(tahun: int, sumber: str, bulan: int = 0, format: str = "pdf", user=Dep
 
 
 # ---------------------------------------------------------------- satu SPJ
+MAKS_BERKAS, MAKS_UKURAN = 8, 4 * 1024 * 1024
+
+
+def _tipe(data: bytes):
+    if data[:3] == b"\xff\xd8\xff":
+        return "image/jpeg", ".jpg"
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png", ".png"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp", ".webp"
+    if data[:5] == b"%PDF-":
+        return "application/pdf", ".pdf"
+    return None, None
+
+
+def _daftar_bukti(db, sid):
+    return db.execute("SELECT id, nama, tipe, ukuran, diunggah_oleh, diunggah_pada FROM spj_bukti WHERE spj_id=? ORDER BY id", (sid,)).fetchall()
+
+
+@router.post("/{sid}/bukti")
+async def unggah_bukti(sid: int, request: Request, nama: str = "bukti", user=Depends(auth), db=Depends(get_db)):
+    """Unggah satu foto/PDF bukti (badan permintaan = berkas mentah, mis. dari kamera HP). Foto dikompres di browser; batas 4 MB, 8 berkas per SPJ."""
+    r = _ambil(db, sid)
+    penuh = _lihat(user, r)
+    if not _bisa_ubah(user, r, penuh):
+        raise Gagal("Bukti hanya dapat ditambah saat SPJ berstatus Draft/Dikembalikan dan oleh yang berwenang.", 403)
+    data = await request.body()
+    if not data:
+        raise Gagal("Berkas kosong.")
+    if len(data) > MAKS_UKURAN:
+        raise Gagal(f"Berkas terlalu besar ({len(data) // 1024} KB); maksimal {MAKS_UKURAN // 1024 // 1024} MB.")
+    tipe, ekt = _tipe(data)
+    if not tipe:
+        raise Gagal("Format tidak didukung. Gunakan foto JPG/PNG/WebP atau PDF.")
+    if db.execute("SELECT COUNT(*) c FROM spj_bukti WHERE spj_id=?", (sid,)).fetchone()["c"] >= MAKS_BERKAS:
+        raise Gagal(f"Maksimal {MAKS_BERKAS} berkas bukti per SPJ.")
+    bersih = re.sub(r"\.{2,}", ".", "".join(ch for ch in nama if ch.isalnum() or ch in " ._-"))[:60].lstrip(". ").strip() or "bukti"
+    if not bersih.lower().endswith(ekt):
+        bersih += ekt
+    bid = db.execute("INSERT INTO spj_bukti(spj_id,nama,tipe,ukuran,data,diunggah_oleh) VALUES(?,?,?,?,?,?)", (sid, bersih, tipe, len(data), data, user["username"])).lastrowid
+    audit(db, user, "spj_bukti", bid, "UNGGAH", None, {"spj_id": sid, "nama": bersih, "ukuran": len(data)}, r["dana"])
+    return {"id": bid, "nama": bersih, "tipe": tipe, "ukuran": len(data)}
+
+
+@router.get("/bukti/{bid}")
+def lihat_bukti(bid: int, user=Depends(auth), db=Depends(get_db)):
+    b = db.execute("SELECT * FROM spj_bukti WHERE id=?", (bid,)).fetchone()
+    if not b:
+        raise Gagal("Bukti tidak ditemukan.", 404)
+    _lihat(user, _ambil(db, b["spj_id"]))
+    return Response(b["data"], media_type=b["tipe"], headers={"Content-Disposition": f'inline; filename="{b["nama"]}"', "Cache-Control": "private, max-age=3600"})
+
+
+@router.delete("/bukti/{bid}")
+def hapus_bukti(bid: int, user=Depends(auth), db=Depends(get_db)):
+    b = db.execute("SELECT id, spj_id, nama FROM spj_bukti WHERE id=?", (bid,)).fetchone()
+    if not b:
+        raise Gagal("Bukti tidak ditemukan.", 404)
+    r = _ambil(db, b["spj_id"])
+    penuh = _lihat(user, r)
+    if not _bisa_ubah(user, r, penuh):
+        raise Gagal("Bukti tidak dapat dihapus pada status SPJ ini.", 403)
+    db.execute("DELETE FROM spj_bukti WHERE id=?", (bid,))
+    audit(db, user, "spj_bukti", bid, "HAPUS", {"spj_id": b["spj_id"], "nama": b["nama"]}, None, r["dana"])
+    return {"ok": True}
+
+
 @router.get("/{sid}")
 def rinci(sid: int, user=Depends(auth), db=Depends(get_db)):
     r = _ambil(db, sid)
     penuh = _lihat(user, r)
     o = _bentuk(r, penuh, user)
     o["sisa_baris"] = r["pagu_baris"] - _dibayar_baris(db, r["baris_id"], sid)
+    o["berkas"] = _daftar_bukti(db, sid)
     return o
 
 
@@ -364,8 +433,8 @@ def ubah_status(sid: int, body: dict = Body(default={}), user=Depends(auth), db=
                 raise Gagal("ST sudah dibatalkan.")
             if _set(db, "spj_setelah_selesai", "1") == "1" and dt.date.today().isoformat() < (r["selesai"] or ""):
                 raise Gagal(f"SPJ baru dapat diajukan setelah kegiatan selesai ({dk.tgl(r['selesai'])}).")
-            if not any(x.get("bukti") for x in json.loads(r["rincian_json"])) and body.get("tanpa_bukti") is not True:
-                raise Gagal("Isi nomor/keterangan bukti pada minimal satu komponen (atau ajukan dengan 'tanpa bukti').")
+            if not any(x.get("bukti") for x in json.loads(r["rincian_json"])) and not _daftar_bukti(db, sid) and body.get("tanpa_bukti") is not True:
+                raise Gagal("Isi nomor/keterangan bukti pada minimal satu komponen atau unggah foto bukti (atau ajukan dengan 'tanpa bukti').")
         sets.update(diajukan_pada=sekarang, alasan_kembali=None)
     elif ke == "Dikembalikan":
         if dari not in ("Diajukan", "Diverifikasi") or not pagu_ok:
@@ -448,6 +517,20 @@ def dokumen(sid: int, format: str = "pdf", user=Depends(auth), db=Depends(get_db
     if r["status"] != "Dibayar":
         story.append(dk.P(f"<font color='#b45309'><b>Status: {r['status']} — belum dibayar</b></font>", "n"))
     story += [dk.Spacer(1, 16), ttd]
+    lamp = [b for b in db.execute("SELECT nama, tipe, data FROM spj_bukti WHERE spj_id=? ORDER BY id", (sid,)).fetchall() if b["tipe"].startswith("image/")]
+    if lamp:
+        import io as _io
+
+        from PIL import Image as PILImage
+        from reportlab.platypus import Image as RLImage
+        story += [dk.PageBreak(), dk.P("<b>LAMPIRAN BUKTI</b>", "judul"), dk.Spacer(1, 6)]
+        for i, b in enumerate(lamp, 1):
+            try:
+                w, h = PILImage.open(_io.BytesIO(b["data"])).size
+            except Exception:  # noqa: BLE001
+                continue
+            esk = min(15.5 * dk.cm / w, 11.5 * dk.cm / h)
+            story += [dk.KeepTogether([dk.P(f"Bukti {i}: {dk.esc(b['nama'])}", "kecil"), dk.Spacer(1, 3), RLImage(_io.BytesIO(b["data"]), width=w * esk, height=h * esk), dk.Spacer(1, 10)])]
     pdf = dk.build_pdf(story, f"SPJ {r['id']}")
     fn = f"SPJ_{r['id']}"
     if format == "docx":

@@ -12,7 +12,7 @@ DB_PATH = Path(os.environ.get("SIKADIN_DB") or Path(__file__).resolve().parents[
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users(
   id INTEGER PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL,
-  nama TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN ('kepala','bendahara','bendahara_blud','program','pegawai')),
+  nama TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN ('kepala','bendahara','bendahara_blud','program','pembuat_surat','pegawai')),
   pegawai_id INTEGER REFERENCES pegawai(id), aktif INTEGER NOT NULL DEFAULT 1);
 CREATE TABLE IF NOT EXISTS audit_log(
   id INTEGER PRIMARY KEY, waktu TEXT NOT NULL DEFAULT (datetime('now','localtime')),
@@ -126,7 +126,7 @@ CREATE TABLE IF NOT EXISTS surat_tugas(
   tahun INTEGER NOT NULL, jenis_nomor TEXT NOT NULL DEFAULT 'ST-BOK', nomor_urut INTEGER NOT NULL, nomor TEXT NOT NULL, tanggal_surat TEXT NOT NULL,
   dasar TEXT, maksud TEXT NOT NULL, penandatangan_id INTEGER REFERENCES pejabat(id), isi_json TEXT NOT NULL, nomor_srikandi TEXT,
   status TEXT NOT NULL DEFAULT 'Terbit' CHECK(status IN ('Terbit','Dibatalkan')),
-  versi INTEGER NOT NULL DEFAULT 1, pengganti_dari INTEGER REFERENCES surat_tugas(id), alasan_batal TEXT,
+  versi INTEGER NOT NULL DEFAULT 1, pengganti_dari INTEGER REFERENCES surat_tugas(id), alasan_batal TEXT, srikandi_diunggah_pada TEXT, srikandi_diunggah_oleh TEXT,
   dibuat_oleh TEXT, dibuat_pada TEXT DEFAULT (datetime('now','localtime')), dibatalkan_oleh TEXT, dibatalkan_pada TEXT,
   UNIQUE(tahun, jenis_nomor, nomor_urut), UNIQUE(nomor));
 CREATE UNIQUE INDEX IF NOT EXISTS ux_st_aktif ON surat_tugas(jadwal_id) WHERE status='Terbit';
@@ -181,6 +181,19 @@ CREATE TRIGGER IF NOT EXISTS trg_spj_kunci BEFORE UPDATE ON spj
 WHEN OLD.status='Dibayar' AND NEW.status='Dibayar' BEGIN SELECT RAISE(ABORT, 'SPJ_TERKUNCI'); END;
 CREATE TRIGGER IF NOT EXISTS trg_spj_nodel BEFORE DELETE ON spj WHEN OLD.status NOT IN ('Draft','Dikembalikan')
 BEGIN SELECT RAISE(ABORT, 'SPJ_TIDAK_BOLEH_DIHAPUS'); END;
+-- Foto/berkas bukti SPJ (disimpan di database agar ikut backup & pemulihan). Hanya boleh berubah saat SPJ Draft/Dikembalikan.
+CREATE TABLE IF NOT EXISTS spj_bukti(
+  id INTEGER PRIMARY KEY, spj_id INTEGER NOT NULL REFERENCES spj(id) ON DELETE CASCADE, nama TEXT NOT NULL, tipe TEXT NOT NULL,
+  ukuran INTEGER NOT NULL, data BLOB NOT NULL, diunggah_oleh TEXT, diunggah_pada TEXT DEFAULT (datetime('now','localtime')));
+CREATE INDEX IF NOT EXISTS ix_spj_bukti ON spj_bukti(spj_id);
+CREATE TRIGGER IF NOT EXISTS trg_bukti_ins BEFORE INSERT ON spj_bukti
+WHEN (SELECT status FROM spj WHERE id=NEW.spj_id) NOT IN ('Draft','Dikembalikan') BEGIN SELECT RAISE(ABORT, 'BUKTI_TERKUNCI'); END;
+-- Dokumen FINAL hasil Srikandi (PDF bertanda tangan elektronik) per Surat Tugas; boleh diganti, selalu tercatat di audit.
+CREATE TABLE IF NOT EXISTS st_final(
+  id INTEGER PRIMARY KEY, st_id INTEGER NOT NULL UNIQUE REFERENCES surat_tugas(id), nama TEXT NOT NULL, ukuran INTEGER NOT NULL, data BLOB NOT NULL,
+  nomor_terdeteksi TEXT, diunggah_oleh TEXT, diunggah_pada TEXT DEFAULT (datetime('now','localtime')));
+CREATE TRIGGER IF NOT EXISTS trg_bukti_del BEFORE DELETE ON spj_bukti
+WHEN (SELECT status FROM spj WHERE id=OLD.spj_id) NOT IN ('Draft','Dikembalikan') BEGIN SELECT RAISE(ABORT, 'BUKTI_TERKUNCI'); END;
 """
 
 
@@ -265,7 +278,7 @@ PENGATURAN_BARU = [
 
 SCHEMA_USERS = """CREATE TABLE users(
   id INTEGER PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL,
-  nama TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN ('kepala','bendahara','bendahara_blud','program','pegawai')),
+  nama TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN ('kepala','bendahara','bendahara_blud','program','pembuat_surat','pegawai')),
   pegawai_id INTEGER REFERENCES pegawai(id), aktif INTEGER NOT NULL DEFAULT 1);"""
 SCHEMA_BOK_PAGU = """CREATE TABLE bok_pagu(
   id INTEGER PRIMARY KEY, tahun INTEGER NOT NULL, sumber_dana_id INTEGER NOT NULL REFERENCES sumber_dana(id),
@@ -340,7 +353,7 @@ def init_db() -> None:
     con.execute("CREATE INDEX IF NOT EXISTS ix_bok_menu_sumber ON bok_menu(tahun, sumber_dana_id)")
     # Migrasi: peran 'bendahara_blud' (tabel users dibuat ulang karena CHECK tidak bisa diubah) & kolom audit_log.sumber
     sql_users = (con.execute("SELECT sql FROM sqlite_master WHERE name='users'").fetchone() or {}).get("sql") or ""
-    if sql_users and "bendahara_blud" not in sql_users:
+    if sql_users and "pembuat_surat" not in sql_users:
         con.execute("PRAGMA foreign_keys=OFF")
         con.executescript("ALTER TABLE users RENAME TO users_lama;" + SCHEMA_USERS)
         con.execute("INSERT INTO users(id,username,password_hash,nama,role,pegawai_id,aktif) SELECT id,username,password_hash,nama,role,pegawai_id,aktif FROM users_lama")
@@ -365,6 +378,12 @@ def init_db() -> None:
     if "nomor_urut" in spd_sql and con.execute("SELECT COUNT(*) c FROM spd").fetchone()["c"] == 0:
         con.executescript("DROP TRIGGER IF EXISTS trg_spd_kunci; DROP TRIGGER IF EXISTS trg_spd_nodel; DROP TABLE spd;")
         con.executescript(SCHEMA)
+    kolom_st = {r["name"] for r in con.execute("PRAGMA table_info(surat_tugas)").fetchall()}
+    for kol in ("srikandi_diunggah_pada", "srikandi_diunggah_oleh"):
+        if kol not in kolom_st:
+            con.execute(f"ALTER TABLE surat_tugas ADD COLUMN {kol} TEXT")
+    if con.execute("SELECT COUNT(*) c FROM users").fetchone()["c"] and not con.execute("SELECT 1 FROM users WHERE username='pembuat_surat'").fetchone():
+        con.execute("INSERT INTO users(username,password_hash,nama,role,pegawai_id) VALUES(?,?,?,?,?)", ("pembuat_surat", hash_password(os.environ.get("SIKADIN_ADMIN_PASSWORD") or "sikadin2026"), "Pembuat Surat (ganti nama)", "pembuat_surat", None))
     if "nomor_srikandi" not in {r["name"] for r in con.execute("PRAGMA table_info(surat_tugas)").fetchall()}:
         con.execute("ALTER TABLE surat_tugas ADD COLUMN nomor_srikandi TEXT")
         con.executescript(SCHEMA)
@@ -474,5 +493,6 @@ def _seed(con: sqlite3.Connection) -> None:
     pw = os.environ.get("SIKADIN_ADMIN_PASSWORD") or "sikadin2026"
     for u, n, r, p in [("kepala", "dr. Rina Marlina", "kepala", 1), ("bendahara", "Dewi Lestari, A.Md.Gz", "bendahara", 5),
                        ("bendahara_blud", "Bendahara BLUD (ganti nama)", "bendahara_blud", None),
-                       ("program", "Agus Prasetyo, SKM", "program", 4), ("pegawai", "Budi Santoso, S.Kep", "pegawai", 2)]:
+                       ("program", "Agus Prasetyo, SKM", "program", 4), ("pembuat_surat", "Pembuat Surat (ganti nama)", "pembuat_surat", None),
+                       ("pegawai", "Budi Santoso, S.Kep", "pegawai", 2)]:
         con.execute("INSERT INTO users(username,password_hash,nama,role,pegawai_id) VALUES(?,?,?,?,?)", (u, hash_password(pw), n, r, p))

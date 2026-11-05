@@ -69,7 +69,7 @@ def akses_sumber(u: dict, kode: str, aksi: str = "baca") -> bool:
         return role == "bendahara_blud"
     if role == "bendahara":
         return True
-    if role == "program":
+    if role in ("program", "pembuat_surat"):
         return aksi in ("baca", "rencana")
     if role == "bendahara_blud":
         return aksi == "baca"
@@ -124,6 +124,8 @@ def audit(db, user: dict, tabel: str, rid, aksi: str, lama=None, baru=None, sumb
 
 def pesan_db(e: Exception) -> str:
     m = str(e)
+    if "BUKTI_TERKUNCI" in m:
+        return "Bukti hanya dapat diubah saat SPJ berstatus Draft atau Dikembalikan."
     if "SPJ_TERKUNCI" in m:
         return "SPJ yang sudah dibayar terkunci."
     if "SPJ_TIDAK_BOLEH_DIHAPUS" in m:

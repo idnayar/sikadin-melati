@@ -44,7 +44,7 @@ def _bisa_ubah(u, j) -> bool:
     """j['dana'] = kode sumber dana (BLUD hanya Kepala & Bendahara BLUD)."""
     if j.get("dana") and not akses_sumber(u, j["dana"], "rencana"):
         return False
-    return u["role"] in ("kepala", "bendahara", "bendahara_blud") or (u["role"] == "program" and j["dibuat_oleh"] == u["username"])
+    return u["role"] in ("kepala", "bendahara", "bendahara_blud") or (u["role"] in ("program", "pembuat_surat") and j["dibuat_oleh"] == u["username"])
 
 
 def _beban_bulan(db, pegawai_id, ym, excl=0) -> int:

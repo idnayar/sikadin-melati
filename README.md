@@ -89,6 +89,11 @@ Dibuat dari **jadwal yang sudah disetujui** (menu Surat Tugas & SPD). Satu ST + 
 ## Rekap perjalanan dinas
 Menu *Rekap Perjalanan Dinas*: per nama, tempat, waktu, tujuan, biaya (SPD) dan realisasi (SPJ dibayar) — setahun & per bulan; filter bulan/sumber/pegawai/tempat/teks; ekspor PDF/DOCX/XLSX. Pegawai hanya melihat miliknya; BLUD tetap terbatas.
 
+## Pembuat Surat Tugas, foto bukti SPJ, penyelesaian di Srikandi
+- Peran **pembuat_surat**: hak sumber seperti Pengelola Program (BOK/DAU; BLUD tidak), menu ringkas (Dashboard, Jadwal, Surat, Rekap, Kalkulator), tidak dapat mengubah RAB, memverifikasi/membayar SPJ, atau membuka akuntansi. Akun `pembuat_surat` ditambahkan otomatis (ganti nama & sandi).
+- **Alur ST sampai selesai:** terbit → unduh DOCX → *Tandai sudah diunggah ke Srikandi* → *Unggah PDF hasil Srikandi* (nomor naskah dibaca otomatis dari PDF; pengguna mengonfirmasi) → progres **Selesai di Srikandi** (3/3). PDF final disimpan di database (`st_final`), boleh diganti (tercatat di riwayat).
+- **Foto bukti SPJ:** unggah dari kamera/galeri (dikecilkan di browser), maks. 8 berkas × 4 MB per SPJ, hanya JPG/PNG/WebP/PDF (diperiksa isinya), terkunci setelah diajukan (juga di DB), ikut sebagai lampiran PDF SPJ, ikut backup & pemulihan.
+
 ## Dashboard (Tahap 7)
 Beranda per peran (`/api/dashboard`): kartu pagu/realisasi/proses/sisa/serapan, daftar **pekerjaan yang menunggu** (rencana & jadwal belum disetujui, jadwal siap ST, ST belum bernomor Srikandi, SPJ untuk dilengkapi/diverifikasi/dibayar — tiap tombol langsung membuka menunya), peringatan (baris RAB ≥ 90% atau melebihi pagu, pegawai melebihi batas hari dinas, serapan jauh di bawah target), serapan per sumber, grafik rencana vs realisasi per bulan, jadwal 14 hari ke depan, ringkasan keuangan (hanya Kepala + Bendahara BLUD). Pegawai melihat perjalanan mendatang dan status SPJ miliknya. Semua angka mengikuti hak akses sumber dana (BLUD terisolasi). Tahun ST/SPJ mengikuti **tahun anggaran jadwal**, bukan tahun tanggal surat.
 

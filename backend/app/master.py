@@ -85,7 +85,7 @@ RES = {
     "users": {
         "judul": "Pengguna", "tabel": "users", "urut": "username", "onlyKepala": 1, "unik": ["username"],
         "fields": [F("username", "Username", req=1), F("nama", "Nama", req=1),
-                   F("role", "Hak akses", "select", req=1, opts=[["kepala", "Kepala Puskesmas"], ["bendahara", "Bendahara (BOK/DAU)"], ["bendahara_blud", "Bendahara BLUD"], ["program", "Pengelola Program"], ["pegawai", "Pegawai"]]),
+                   F("role", "Hak akses", "select", req=1, opts=[["kepala", "Kepala Puskesmas"], ["bendahara", "Bendahara (BOK/DAU)"], ["bendahara_blud", "Bendahara BLUD"], ["program", "Pengelola Program"], ["pembuat_surat", "Pembuat Surat Tugas"], ["pegawai", "Pegawai"]]),
                    F("pegawai_id", "Terkait pegawai", "ref", ref="pegawai", refLabel="nama"),
                    F("password", "Password (isi untuk mengubah)", "password", virtual=1), AKTIF],
         "list": ["username", "nama", "role", "aktif"],

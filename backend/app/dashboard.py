@@ -89,8 +89,9 @@ def dashboard(tahun: int, user=Depends(auth), db=Depends(get_db)):
     n = c(f"""SELECT COUNT(*) c FROM jadwal j JOIN sumber_dana sd ON sd.id=j.sumber_dana_id WHERE j.tahun=? AND j.status IN {sts} AND sd.kode IN ({pr})
         AND NOT EXISTS(SELECT 1 FROM surat_tugas s WHERE s.jadwal_id=j.id AND s.status='Terbit')""", (tahun, *can_rencana))
     tugas.append({"kunci": "st", "label": "Jadwal siap dibuatkan Surat Tugas", "n": n, "tujuan": "st"})
-    n = c(f"SELECT COUNT(*) c FROM surat_tugas s JOIN jadwal jj ON jj.id=s.jadwal_id JOIN sumber_dana sd ON sd.id=s.sumber_dana_id WHERE jj.tahun=? AND s.status='Terbit' AND s.nomor_srikandi IS NULL AND sd.kode IN ({pr})", (tahun, *can_rencana))
-    tugas.append({"kunci": "srikandi", "label": "ST belum dicatat nomor Srikandi-nya", "n": n, "tujuan": "st"})
+    n = c(f"""SELECT COUNT(*) c FROM surat_tugas s JOIN jadwal jj ON jj.id=s.jadwal_id JOIN sumber_dana sd ON sd.id=s.sumber_dana_id WHERE jj.tahun=? AND s.status='Terbit'
+        AND (s.nomor_srikandi IS NULL OR NOT EXISTS(SELECT 1 FROM st_final f WHERE f.st_id=s.id)) AND sd.kode IN ({pr})""", (tahun, *can_rencana))
+    tugas.append({"kunci": "srikandi", "label": "ST belum selesai di Srikandi (nomor / PDF final)", "n": n, "tujuan": "st"})
     n = c(f"SELECT COUNT(*) c FROM spj s JOIN sumber_dana sd ON sd.id=s.sumber_dana_id WHERE s.tahun=? AND s.status IN ('Draft','Dikembalikan') AND sd.kode IN ({pr})", (tahun, *can_rencana))
     tugas.append({"kunci": "spj_draft", "label": "SPJ belum diajukan / dikembalikan", "n": n, "tujuan": "spj"})
     n = c(f"SELECT COUNT(*) c FROM spj s JOIN sumber_dana sd ON sd.id=s.sumber_dana_id WHERE s.tahun=? AND s.status='Diajukan' AND sd.kode IN ({pp})", (tahun, *can_pagu))

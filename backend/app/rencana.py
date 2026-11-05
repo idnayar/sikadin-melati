@@ -113,7 +113,7 @@ def bisa_ubah(db, u, r) -> bool:
     """Boleh mengubah rencana: harus berhak atas sumber dananya (BLUD: hanya Kepala & Bendahara BLUD); Pengelola Program hanya miliknya."""
     if not akses_sumber(u, kode_sd(db, r["sumber_dana_id"]), "rencana"):
         return False
-    return u["role"] in ("kepala", "bendahara", "bendahara_blud") or (u["role"] == "program" and r["dibuat_oleh"] == u["username"])
+    return u["role"] in ("kepala", "bendahara", "bendahara_blud") or (u["role"] in ("program", "pembuat_surat") and r["dibuat_oleh"] == u["username"])
 
 
 @router.get("/opsi")
