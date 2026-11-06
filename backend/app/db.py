@@ -12,6 +12,9 @@ import pymysql
 import pymysql.cursors
 from urllib.parse import urlparse
 
+from pathlib import Path
+DB_PATH = Path(os.environ.get("SIKADIN_DB") or "sikadin.db")
+
 # URL format dari Render environment, misal: mysql+pymysql://user_db:password_db@IP_CPANEL/nama_db
 DB_URL_STR = os.environ.get("DATABASE_URL")
 
